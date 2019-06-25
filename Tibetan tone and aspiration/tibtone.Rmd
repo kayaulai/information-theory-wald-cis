@@ -1,0 +1,58 @@
+---
+title: "Tibetan tone entropy"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Preparing texts and grabbing onsets
+
+```{r}
+library(readr)
+
+wylieTexts = read_lines("wylie_texts.txt")
+clauses = strsplit(text, "((_|)(\\/|\\/\\/|)\\[( |)\\_ \\])|(\\((\\(|))|(,(,|))", fixed = FALSE, perl = FALSE, useBytes = FALSE)[[1]]
+words = Reduce(c, sapply(clauses, function(x) strsplit(x, "_")))
+syl1s = sapply(words, function(x) strsplit(x, " ")[[1]][1])
+onsets = sapply(syl1s, function(x){
+  nucPos = regexpr("[a|e|i|o|u]",x)[1]
+  substring(x, 1, nucPos-1)
+  })
+determineTone = function(onset){
+  if(onset %in% c(""))
+}
+
+```
+
+## Parsing onsets and determining tone
+```{r}
+
+prefixes = c("g","b","d","m","'","")
+superscripts = c("r","l","s","")
+basics = c("k","kh","g","ng","c","ch","j","ny","t","th","d","n","p","ph","b","m","ts","tsh","dz","w","zh","z","'","y","r","l","sh","s","h","")
+subscripts = c("y","r","l","w","")
+
+#hightone_onsets = c(hightone_single_onsets, ky,py,hy,khy,phy,kr,tr,pr,hr,khr,thr,phr,kl,rl,gl,bl,sl,kw,cw,tw,tsw,hw,khw,tshw,shw,sw,rk,rt,rts,rng,rny,rn,rm,lk,lc,lt,lp,lh,lng,sk,st,sp,sts,sng,sny,sn,sm,rky,sky,skr,spy,spr,rmy,smy,smr,gc,gt,gts,gny,gn,gs,dk,dp,db,dng,dm,dkr,dpr,dbr,dmr,dkr,dpr,dbr,dmr,dky,dpy,dby,dmy,bk,bc,bt,bts,bsh,brng,brny,brn,bs,mkh,mch,mth,mtsh,mng,mny,mn,)
+
+hightone_single_onsets = c("k","c","t","p","ts","kh","cg","th","ph","tsh","sh","s","h","")
+nasals = c("ng","ny","n","m")
+prefix_superscript_combos = as.vector(sapply(prefixes, function(prefix) paste0(prefix, superscripts)))
+hightone_onsets_col12 = as.vector(sapply(prefix_superscript_combos,function(combo) paste0(combo, hightone_single_onsets))) #well, col 1, 2 plus sa and sha
+hightone_onsets_col4 = c(as.vector(sapply(setdiff(prefix_superscript_combos,""),function(combo) paste0(combo, nasals))))
+hightone_onsets_col12_withsub = c(as.vector(sapply(subscripts,function(sub) paste0(hightone_onsets_col12, sub))))
+hightone_onsets_col4_withsub = c(as.vector(sapply(subscripts,function(sub) paste0(hightone_onsets_col4, sub))))
+hightone_misc = c("gl", "bl", "rl", "db")
+hightone_onsets = setdiff(c(hightone_onsets_col12_withsub,hightone_onsets_col4_withsub,hightone_misc),c("w","g","b","d","'", "rw",  "lw", "y", "l" ))
+
+lowtone_single_onsets = c("g","j","d","b","dz","w","zh","z","'","y","r","l")
+prefix_superscript_combos_nol = as.vector(sapply(prefixes, function(prefix) paste0(prefix, setdiff(superscripts, "l"))))
+lowtone_onsets_nosub = as.vector(sapply(prefix_superscript_combos_nol,function(combo) paste0(combo, lowtone_single_onsets))) #well, col 1, 2 plus sa and sha
+lowtone_onsets_withsub = c(as.vector(sapply(subscripts,function(sub) paste0(lowtone_onsets_nosub, sub))))
+lowtone_misc = c("dby", "zl")
+lowtone_onsets = setdiff(c(lowtone_onsets_nosub,lowtone_onsets_withsub,lowtone_misc), "sw", "sl", "")
+```
+
+
+

@@ -1,0 +1,461 @@
+
+
+##Preparatory tasks
+Library, working directory, setting seed:
+  
+```{r}
+library(dplyr)
+library(readr)
+library(MVN)
+
+setwd("G:\\§Úªº¶³ºÝµwºÐ\\Uncertainty estimation with probabilities")
+set.seed(2018)
+```
+
+```{r}
+syls_wt = read.csv("all_syls_withfile.csv") %>% mutate(syl = paste0(o,n,c,t)) %>% mutate(syl = as.factor(syl))
+aps = syls_wt %>% select(-c("file"))
+
+aps_counts = aps %>% group_by(o,n,c,t) %>% summarise(count = n())
+aps_counts = cbind.data.frame(aps_counts, probs = aps_counts$count / sum(aps_counts$count))
+aps_counts = aps_counts %>% mutate(ostar = factor((ifelse(o == "0","0","O"))))
+aps_counts = aps_counts %>% mutate(nstar = factor((ifelse(n == "0","0","N"))))
+aps_counts = aps_counts %>% mutate(cstar = factor((ifelse(c == "0","0","C"))))
+aps_counts = aps_counts %>% mutate(tstar = factor((ifelse(t == "0","0","T"))))
+
+aps_counts = cbind.data.frame(id = 1:nrow(aps_counts),aps_counts)
+
+```
+
+Importing the corpus:
+  
+```{r}
+aps = read_csv("all_parsed_syls_wt.csv")
+aps = aps %>% mutate(syl = paste0(o,n,c,t)) %>% mutate(syl = as.factor(syl))
+aps
+
+aps_aug = aps %>% group_by(o,n,c,t) %>% summarise(count = n()) #One syllable per row with counts
+aps_aug = cbind.data.frame(syl = paste(aps_aug$o, aps_aug$n, aps_aug$c, aps_aug$t, sep=""), aps_aug) #Add syl
+aps_aug
+```
+
+Separate data frames for each component (to facilitate calculations):
+  
+```{r}
+aps_o = aps %>% group_by(o) %>% summarise(count = n())
+aps_n = aps %>% group_by(n) %>% summarise(count = n())
+aps_c = aps %>% group_by(c) %>% summarise(count = n())
+aps_t = aps %>% group_by(t) %>% summarise(count = n())
+aps_sep = list(o=aps_o,n=aps_n,c=aps_c,t=aps_t)
+head(aps_o)
+```
+
+## Entropy estimation calculations
+
+Probability estimations:
+  
+```{r}
+probs = aps_aug$count / sum(aps_aug$count) #MLEs of probs
+theta = probs[-length(probs)] #The parameter vector excludes the last prob
+head(probs)
+```
+
+
+Entropy estimations:
+```{r}
+getEntropy = function(data){
+  values = unique(data)
+  problgprob = function(x){
+    prob = length(data[data==x]) / length(data)
+    return(prob * log(prob,2))
+  }
+  entropy = -sum(sapply(values,problgprob))
+  return(entropy)
+}
+getEntropy = function(data){
+  values = unique(data)
+  problgprob = function(x){
+    prob = length(data[data==x]) / length(data)
+    return(prob * log(prob,2))
+  }
+  entropy = -sum(sapply(values,problgprob))
+  return(entropy)
+}
+
+
+getEntropy(aps$o)
+getEntropy(aps$n)
+getEntropy(aps$c)
+getEntropy(aps$t)
+estimates = c(getEntropy(aps$o),getEntropy(aps$n),getEntropy(aps$c),getEntropy(aps$t))
+overallEntropy = getEntropy(paste(aps$o,aps$n,aps$c,aps$t))
+```
+
+Functional load estimations:
+
+```{r}
+aps_noo = aps %>% mutate(o = factor((ifelse(o == "0","0","O"))))
+aps_non = aps %>% mutate(n = factor((ifelse(n == "0","0","N"))))
+aps_noc = aps %>% mutate(c = factor((ifelse(c == "0","0","C"))))
+aps_not = aps %>% mutate(t = factor((ifelse(t == "0","0","T"))))
+
+entropyWOO = getEntropy(paste(aps_noo$o,aps_noo$n,aps_noo$c,aps_noo$t))
+entropyWON = getEntropy(paste(aps_non$o,aps_non$n,aps_non$c,aps_non$t))
+entropyWOC = getEntropy(paste(aps_noc$o,aps_noc$n,aps_noc$c,aps_noc$t))
+entropyWOT = getEntropy(paste(aps_not$o,aps_not$n,aps_not$c,aps_not$t))
+
+fl_o = (overallEntropy - entropyWOO)/overallEntropy
+fl_n = (overallEntropy - entropyWON)/overallEntropy
+fl_c = (overallEntropy - entropyWOC)/overallEntropy
+fl_t = (overallEntropy - entropyWOT)/overallEntropy
+fl = c(fl_o,fl_n,fl_c,fl_t)
+```
+
+Alternative way of finding modified entropies:
+
+```{r}
+findModifiedEntropy = function(cols = c("ostar","n","c","t"), df){
+  done = logical(nrow(df))
+  probs = vector()
+  for(i in 1:nrow(df)){
+    if(done[i]) next;
+    filteredDF = df %>% filter(get(cols[1])==df[i,cols[1]],get(cols[2])==df[i,cols[2]],get(cols[3])==df[i,cols[3]],get(cols[4])==df[i,cols[4]])
+    curr_sumprob = sum(filteredDF$probs)
+    probs = probs %>% append(curr_sumprob)
+    done[filteredDF$id] = T
+  }
+  entropy = -sum((probs * log(probs,2)))
+  return(entropy)
+}
+
+findModifiedEntropy(c("ostar","n","c","t"),aps_counts)
+```
+
+
+
+Some functions for uncertainty calculations. Derivations of the formulas in the paper.
+
+```{r}
+findModifiedEntropyAndDerivative = function(cols = c("ostar","n","c","t"), df){
+  done = logical(nrow(df))
+  probs = vector()
+  
+  lastRowID = nrow(df)
+  lastRowGroup = df %>% filter(get(cols[1])==df[lastRowID,cols[1]],get(cols[2])==df[lastRowID,cols[2]],get(cols[3])==df[lastRowID,cols[3]],get(cols[4])==df[lastRowID,cols[4]])
+  lastRowProb = sum(lastRowGroup$probs)
+  lastLog = log(lastRowProb,2)
+  derivatives = numeric(nrow(df)-1)
+  
+  for(i in 1:nrow(df)){
+    if(done[i]) next;
+    filteredDF = df %>% filter(get(cols[1])==df[i,cols[1]],get(cols[2])==df[i,cols[2]],get(cols[3])==df[i,cols[3]],get(cols[4])==df[i,cols[4]])
+    curr_sumprob = sum(filteredDF$probs)
+    probs = probs %>% append(curr_sumprob)
+    
+    derivatives[filteredDF$id] = lastLog - log(curr_sumprob,2)
+    done[filteredDF$id] = T
+  }
+  entropy = -sum((probs * log(probs,2)))
+  
+  return(list(entropy = entropy, derivatives = derivatives[1:(nrow(df)-1)]))
+}
+
+findFisher = function(theta, n){
+  pk = 1 - sum(theta)
+  diagonal = 1/theta
+  fisher =  matrix(numeric(length(theta)^2)+1/pk,nrow=length(theta)) +diag(diagonal)
+  return(n * fisher)
+}
+
+findAlpha = function(data){
+  alpha = sapply(c("o","n","c","t"),findAlphaRow,data)
+  return((alpha))
+}
+
+findAlphaRow = function(element,df){
+  components = c("o","n","c","t")
+  components[which(components == element)] = paste(element,"star",sep="")
+
+  entropy = findModifiedEntropy(c("o","n","c","t"),df)
+  finalID = nrow(df)
+  probs = (df$probs)[-finalID]
+  probLast = (df$probs)[finalID]
+  entropyPrime = log(probLast,2) - log(probs,2)
+  
+  entropyAndDerivative= findModifiedEntropyAndDerivative(components, df)
+  modifiedEntropy = entropyAndDerivative$entropy
+  modifiedEntropyPrime = entropyAndDerivative$derivatives
+  
+  row = ((entropyPrime - modifiedEntropyPrime) * entropy  - (entropy - modifiedEntropy) * entropyPrime ) / (entropy)^2
+  return(row)
+}
+
+findAlphaRow("n",aps_counts)
+```
+
+Implementing the functions:
+  
+```{r}
+n = nrow(aps)
+alpha = findAlpha(aps_counts)
+info = findFisher(aps_counts$probs[-nrow(aps_counts)], nrow(aps))
+var = t(alpha) %*% (solve(info)) %*% (alpha)
+cmatrix = t(matrix(c(1,-1,0,0,
+                     1,0,-1,0,
+                     1,0,0,-1,
+                     0,1,-1,0,
+                     0,1,0,-1,
+                     0,0,1,-1),nrow=4))
+var_diffs = cmatrix %*% var %*% t(cmatrix)
+
+estimates_diffs = cmatrix %*% fl
+cv = qnorm(1-.05/6)
+estimates_diffs - cv * sqrt(diag(var_diffs))
+estimates_diffs + cv * sqrt(diag(var_diffs))
+```
+
+```{r}
+n = (nrow(aps))
+nosyls = nrow(aps_aug)
+cum = sapply(1:nrow(aps_aug), function(x) sum(aps_aug$count[1:x])/sum(aps_aug$count) ) #'cdf' after arrangement from most to least common
+```
+
+
+## Verifying the formula with a fake corpus
+
+
+
+```{r}
+getEntropyFromFreqs = function(data){
+  values = pull(data,1)
+  total = sum(data[,2])
+  problgprob = function(x){
+    prob = data[x,2] / total
+    return(prob * log(prob,2))
+  }
+  entropy = -sum(unlist(sapply(1:nrow(data),problgprob)))
+  return(entropy)
+}
+```
+
+Create a bunch of fake corpora:
+  
+```{r}
+createFakeCorpus = function(n, cum, nosyls, aps_aug){
+  #Use a bunch of random numbers and the 'cdf' to determine which syllable each datum is
+  randomnos = runif(n)
+  syls = sapply(1:n,function(x) return(which(cum==min(cum[cum>=randomnos[x]]))[1]))
+  
+  #Get the new syllable counts and attach the counts to a new aps table
+  table_syls = table(syls)
+  new_syls = sapply(1:nosyls, function(x){ value = table_syls[as.character(x)]; if(!is.na(value)) return(value) else return(0)})
+  aps_aug_fake = cbind(aps_aug[-ncol(aps_aug)],count = new_syls)
+  aps_aug_fake
+}
+library(parallel)
+cl = makeCluster(getOption("cl.cores", detectCores()),outfile="log.txt")
+clusterExport(cl, c("findAlpha","findFisher","findAlphaRow","getEntropyFromFreqs"))
+clusterEvalQ(cl, library(dplyr))
+fakeCorpora = parLapply(cl, rep(n,1000), createFakeCorpus, cum, nosyls, aps_aug)
+```
+
+Get probability and entropy calculations from the corpora, and verify the asympotic distribution:
+  
+```{r}
+aug_to_data = function(aps_aug) aps_aug[rep(seq_len(nrow(aps_aug)), times = aps_aug$count),]
+
+getFLDiffsFromFakeCorpus = function(aps_aug_fake, cmatrix){
+  aps_fake = aps_aug_fake %>% aug_to_data
+  overallEntropy = getEntropy(paste(aps_fake$o,aps_fake$n,aps_fake$c,aps_fake$t))
+  
+  #aps_o_fake = aps_aug_fake %>% group_by(o) %>% summarise(count = sum(count)) %>% aug_to_data
+  #aps_n_fake = aps_aug_fake %>% group_by(n) %>% summarise(count = sum(count)) %>% aug_to_data
+  #aps_c_fake = aps_aug_fake %>% group_by(c) %>% summarise(count = sum(count)) %>% aug_to_data
+  #aps_t_fake = aps_aug_fake %>% group_by(t) %>% summarise(count = sum(count)) %>% aug_to_data
+  #aps_sep_fake = list(o=aps_o_fake,n=aps_n_fake,c=aps_c_fake,t=aps_t_fake)
+  
+  aps_noo = aps_aug_fake %>% mutate(o = factor((ifelse(o == "0","0","O")))) %>% aug_to_data
+  aps_non = aps_aug_fake %>% mutate(n = factor((ifelse(n == "0","0","N")))) %>% aug_to_data
+  aps_noc = aps_aug_fake %>% mutate(c = factor((ifelse(c == "0","0","C")))) %>% aug_to_data
+  aps_not = aps_aug_fake %>% mutate(t = factor((ifelse(t == "0","0","T")))) %>% aug_to_data
+  
+  entropyWOO = getEntropy(paste(aps_noo$o,aps_noo$n,aps_noo$c,aps_noo$t))
+  entropyWON = getEntropy(paste(aps_non$o,aps_non$n,aps_non$c,aps_non$t))
+  entropyWOC = getEntropy(paste(aps_noc$o,aps_noc$n,aps_noc$c,aps_noc$t))
+  entropyWOT = getEntropy(paste(aps_not$o,aps_not$n,aps_not$c,aps_not$t))
+  
+  fl_o = (overallEntropy - entropyWOO)/overallEntropy
+  fl_n = (overallEntropy - entropyWON)/overallEntropy
+  fl_c = (overallEntropy - entropyWOC)/overallEntropy
+  fl_t = (overallEntropy - entropyWOT)/overallEntropy
+  estimates = c(fl_o,fl_n,fl_c,fl_t)
+  cmatrix %*% estimates
+}
+
+clusterExport(cl, c("getEntropy","aug_to_data"))
+simFLDiffEstimates = parLapply(cl, fakeCorpora, getFLDiffsFromFakeCorpus, cmatrix)
+simFLDiffMatrix = t(Reduce(cbind, simFLDiffEstimates))
+empFLDiffMeanVec = colMeans(simFLDiffMatrix)
+empFLDiffVarMatrix = var(simFLDiffMatrix)
+shapiro.test(simFLDiffMatrix[,1])
+shapiro.test(simFLDiffMatrix[,2])
+shapiro.test(simFLDiffMatrix[,3])
+shapiro.test(simFLDiffMatrix[,4])
+shapiro.test(simFLDiffMatrix[,5])
+shapiro.test(simFLDiffMatrix[,6])
+
+getProbsFromFakeCorpus = function(aps_aug_fake){
+  probs = aps_aug_fake$count / sum(aps_aug_fake$count) #MLEs of probs
+  probs    
+}
+simProbsEstimates = parLapply(cl, fakeCorpora, getProbsFromFakeCorpus)
+
+```
+
+```{r}
+
+getCIsFromFakeCorpus = function(aps_aug_fake, estimates_diffs, cmatrix, n){
+  aps_aug_fake = aps_aug_fake %>% filter(count > 0)
+  aps_o_fake = aps_aug_fake %>% group_by(o) %>% summarise(count = sum(count))
+  aps_n_fake = aps_aug_fake %>% group_by(n) %>% summarise(count = sum(count))
+  aps_c_fake = aps_aug_fake %>% group_by(c) %>% summarise(count = sum(count))
+  aps_t_fake = aps_aug_fake %>% group_by(t) %>% summarise(count = sum(count))
+  aps_sep_fake = list(o=aps_o_fake,n=aps_n_fake,c=aps_c_fake,t=aps_t_fake)
+  
+  aps_counts_fake = cbind.data.frame(aps_aug_fake, probs = aps_aug_fake$count / sum(aps_aug_fake$count))
+  aps_counts_fake = aps_counts_fake %>% mutate(ostar = factor((ifelse(o == "0","0","O"))))
+  aps_counts_fake = aps_counts_fake %>% mutate(nstar = factor((ifelse(n == "0","0","N"))))
+  aps_counts_fake = aps_counts_fake %>% mutate(cstar = factor((ifelse(c == "0","0","C"))))
+  aps_counts_fake = aps_counts_fake %>% mutate(tstar = factor((ifelse(t == "0","0","T"))))
+  
+  #Calculate var-cov matrix for new table
+  probs = aps_aug_fake$count / sum(aps_aug_fake$count)
+  print("hi2")
+  theta = probs[-length(probs)]
+  alpha = findAlpha(aps_counts_fake)
+  print("hi1")
+  
+  info = findFisher(aps_counts_fake$probs[-nrow(aps_counts_fake)], n)
+  var = t(alpha) %*% (solve(info)) %*% alpha
+  var_diffs = cmatrix %*% var %*% t(cmatrix)
+
+  #CIs
+  lower = estimates_diffs - qnorm(0.9916667) * sqrt(diag(var_diffs))
+  upper = estimates_diffs + qnorm(0.9916667) * sqrt(diag(var_diffs))
+  print("Done one cycle")
+  c(lower, upper)
+}
+getCIsFromFakeCorpus(fakeCorpora[[1]],simFLDiffEstimates[[1]], cmatrix, 155672)
+clusterExport(cl, c("getCIsFromFakeCorpus", "fakeCorpora", "simFLDiffEstimates","findFisher","n","cmatrix","findModifiedEntropyAndDerivative","findModifiedEntropy"))
+simEntropyCIs = parSapply(cl, 1:length(fakeCorpora), function(x) getCIsFromFakeCorpus(fakeCorpora[[x]], simFLDiffEstimates[[x]], cmatrix, n))
+trueEntropies = estimates_diffs
+coverages = apply(simEntropyCIs, 2, function(col) (col[1:6] <= trueEntropies) & (col[7:12] >= trueEntropies))
+coverageOverall = apply(coverages, 2, function(col) all(col))
+coveragesSep = apply(coverages, 1, function(row) mean(row))
+
+```
+
+
+## Simulation with file REs
+Importing the corpus with filenames:
+
+```{r}
+aps.wf = read.csv("all_syls_withfile.csv") %>% mutate(syl = paste0(o,n,c,t)) %>% mutate(syl = as.factor(syl))
+aps.wf_counts = aps %>% group_by(o,n,c,t,file) %>% summarise(count = n())
+```
+
+```{r}
+library(brms)
+softmax_re_stanmodel = mblogit(syl ~ 1, aps.wf, random = ~ 1 | file)
+```
+
+
+##Simulation with words
+
+
+##Simulation with words
+Import words version of the data, compute counts and probs:
+
+```{r}
+apw = read.csv("all_words_withfile.csv", colClasses = "factor")
+colnames(apw) = c(paste0(rep(c("o","n","c","t"),10),rep(1:10, each=4)), "file")
+words = apply(apw, 1, function(row) paste0(row[paste0(rep(c("o","n","c","t"),10),rep(1:10, each=4))], collapse=""))
+apw = apw %>% mutate(word = words)
+apw_aug = apw %>% group_by(word,o1,n1,c1,t1,o2,n2,c2,t2,o3,n3,c3,t3,o4,n4,c4,t4,o5,n5,c5,t5,o6,n6,c6,t6,o7,n7,c7,t7,o8,n8,c8,t8,o9,n9,c9,t9,o10,n10,c10,t10) %>% summarise(count = n())
+
+n_w = nrow(apw)
+probs_w = apw_aug$count / sum(apw_aug$count)
+cum_w = sapply(1:nrow(apw_aug), function(x) sum(apw_aug$count[1:x])/sum(apw_aug$count) ) 
+```
+
+Create a fake corpora from words:
+
+```{r}
+createFakeWordCorpus = function(n, cum, nosyls, aps_aug){
+  #Use a bunch of random numbers and the 'cdf' to determine which syllable each datum is
+  randomnos = runif(n)
+  words = sapply(1:n,function(x) return(which(cum==min(cum[cum>=randomnos[x]]))[1]))
+  
+  #Get the new syllable counts and attach the counts to a new aps table
+  table_syls = table(syls)
+  new_syls = sapply(1:nosyls, function(x){ value = table_syls[as.character(x)]; if(!is.na(value)) return(value) else return(0)})
+  aps_aug_fake = cbind(aps_aug[-ncol(aps_aug)],count = new_syls)
+  aps_aug_fake
+}
+library(parallel)
+cl = makeCluster(getOption("cl.cores", detectCores()),outfile="log.txt")
+clusterExport(cl, c("findAlpha","findFisher","findAlphaRow","getEntropyFromFreqs"))
+clusterEvalQ(cl, library(dplyr))
+fakeCorporaWordFmt = parLapply(cl, rep(n_w,1000), createFakeCorpus, cum_w, nrow(apw_aug), apw_aug)
+
+```
+
+Get character-level DF from word-level df:
+
+```{r}
+extractSylsFromRow = function(row){
+  nsyl = max(which(row[paste0("t",1:10)] != ""))
+  
+  lapply(1:nsyl, function(x){
+    compnames = paste0(c("o","n","c","t"),x)
+    c(as.character(row[[compnames[1]]]),as.character(row[[compnames[2]]]),as.character(row[[compnames[3]]]),as.character(row[[compnames[4]]]))
+  })
+}
+getAPSAugfromAPWAug = function(apw_fake, aps_aug){
+  syls = apply(apw_fake, 1, extractSylsFromRow)
+  newRows = lapply(1:nrow(apw_fake), function(i){
+    t(sapply(syls[[i]], function(syl) c(syl,apw_fake[i,"count"])))
+  })
+  df = Reduce(rbind, newRows)
+  df = data.frame(o = unlist(df[,1]),n = unlist(df[,2]),c = unlist(df[,3]), t = unlist(df[,4]), subcount = unlist(df[,5]))
+  df$count = as.numeric(as.character((df$subcount)))
+  #colnames(df) = c("o","n","c","t", "subcount")
+  df = df %>% group_by(o, n, c, t) %>% summarise(count = sum(subcount)) %>% mutate(syl = paste0(o,n,c,t))
+  df
+}
+clusterExport(cl, c("extractSylsFromRow"))
+fakeCorpora_w = parLapply(cl, fakeCorporaWordFmt, getAPSAugfromAPWAug, aps_aug)
+```
+
+Repeat what we've done above:
+```{r}
+simFLDiffEstimates_w = parLapply(cl, fakeCorpora_w, getFLDiffsFromFakeCorpus, cmatrix)
+simFLDiffMatrix_w = t(Reduce(cbind, simFLDiffEstimates_w))
+empFLDiffMeanVec_w = colMeans(simFLDiffMatrix_w)
+empFLDiffVarMatrix_w = var(simFLDiffMatrix_w)
+
+getCIsFromFakeCorpus(fakeCorpora[[1]],simFLDiffEstimates[[1]], cmatrix, 155672)
+clusterExport(cl, c("getCIsFromFakeCorpus", "fakeCorpora", "simFLDiffEstimates","findFisher","n","cmatrix","findModifiedEntropyAndDerivative","findModifiedEntropy"))
+simEntropyCIs = parSapply(cl, 1:length(fakeCorpora), function(x) getCIsFromFakeCorpus(fakeCorpora[[x]], simFLDiffEstimates[[x]], cmatrix, n))
+trueEntropies = estimates_diffs
+coverages = apply(simEntropyCIs, 2, function(col) (col[1:6] <= trueEntropies) & (col[7:12] >= trueEntropies))
+coverageOverall = apply(coverages, 2, function(col) all(col))
+coveragesSep = apply(coverages, 1, function(row) mean(row))
+
+
+getCIsFromFakeCorpus(fakeCorpora_w[[1]],simEntropyEstimates_w[[1]], cmatrix, 155672)
+clusterExport(cl, c("getCIsFromFakeCorpus", "fakeCorpora", "simEntropyEstimates","findFisher","n","cmatrix"))
+simEntropyCIs_w = sapply(1:length(fakeCorpora_w), function(x) getCIsFromFakeCorpus(fakeCorpora_w[[x]], simEntropyEstimates_w[[x]], cmatrix, n))
+coverages_w = apply(simEntropyCIs_w, 2, function(col) (col[1:6] <= trueEntropies) & (col[7:12] >= trueEntropies))
+
+```
