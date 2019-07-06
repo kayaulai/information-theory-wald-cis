@@ -24,7 +24,7 @@ def paste(*lists, sep=" ", collapse=None):
         return reduce_concat(result, sep=collapse)
     return list(result)
 
-fileIDsToSearch = np.arange(27,33)
+fileIDsToSearch = np.arange(27,689)
 fileIDs = [];
 files = [];
 wylieTexts = [];

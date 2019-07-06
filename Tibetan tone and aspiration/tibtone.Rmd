@@ -11,31 +11,91 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ```{r}
 library(readr)
+library(dplyr)
 
 wylieTexts = read_lines("wylie_texts.txt")
-clauses = strsplit(text, "((_|)(\\/|\\/\\/|)\\[( |)\\_ \\])|(\\((\\(|))|(,(,|))", fixed = FALSE, perl = FALSE, useBytes = FALSE)[[1]]
-words = Reduce(c, sapply(clauses, function(x) strsplit(x, "_")))
-syl1s = sapply(words, function(x) strsplit(x, " ")[[1]][1])
-onsets = sapply(syl1s, function(x){
-  nucPos = regexpr("[a|e|i|o|u]",x)[1]
-  substring(x, 1, nucPos-1)
-  })
-determineTone = function(onset){
-  if(onset %in% c(""))
+
+extractOnsets = function(text){
+  clauses = strsplit(text, "((_|)(\\/|\\/\\/|)\\[( |)\\_ \\])|(\\((\\(|))|(,(,|))", fixed = FALSE, perl = FALSE, useBytes = FALSE)[[1]]
+  words = Reduce(c, sapply(clauses, function(x) strsplit(x, "_")))
+  syl1s = sapply(words, function(x) strsplit(x, " ")[[1]][1])
+  onsets = sapply(syl1s, function(x){
+    nucPos = regexpr("[a|e|i|o|u|A|I|U]",x)[1]
+    substring(x, 1, nucPos-1)
+    })
+  as.vector(onsets)
 }
 
+onsetsByText = sapply(wylieTexts, extractOnsets)
+onsetsDF = Reduce(rbind, lapply(1:length(onsetsByText), function(x){
+  frame = numeric()
+  if(length(onsetsByText[[x]]) >= 1) frame = data.frame(doc= x, onset = onsetsByText[[x]])
+  frame
+  }))
+onsetsDF = onsetsDF %>% filter(!is.na(onset))
 ```
 
 ## Parsing onsets and determining tone
+
 ```{r}
 
 prefixes = c("g","b","d","m","'","")
 superscripts = c("r","l","s","")
 basics = c("k","kh","g","ng","c","ch","j","ny","t","th","d","n","p","ph","b","m","ts","tsh","dz","w","zh","z","'","y","r","l","sh","s","h","")
 subscripts = c("y","r","l","w","")
+hightone_single_onsets = c("k","c","t","p","ts","kh","ch","th","ph","tsh","sh","s","h","")
 
-#hightone_onsets = c(hightone_single_onsets, ky,py,hy,khy,phy,kr,tr,pr,hr,khr,thr,phr,kl,rl,gl,bl,sl,kw,cw,tw,tsw,hw,khw,tshw,shw,sw,rk,rt,rts,rng,rny,rn,rm,lk,lc,lt,lp,lh,lng,sk,st,sp,sts,sng,sny,sn,sm,rky,sky,skr,spy,spr,rmy,smy,smr,gc,gt,gts,gny,gn,gs,dk,dp,db,dng,dm,dkr,dpr,dbr,dmr,dkr,dpr,dbr,dmr,dky,dpy,dby,dmy,bk,bc,bt,bts,bsh,brng,brny,brn,bs,mkh,mch,mth,mtsh,mng,mny,mn,)
+hightone_onsets_noprefix = c(hightone_single_onsets,"ky","py","hy","khy","phy","kr","tr","pr","hr","khr","thr","phr","shr","sr","kl","rl","gl","bl","sl","kw","cw","tw","tsw","hw","khw","tshw","shw","sw","rk","rt","rts","rng","rny","rn","rm","lk","lc","lt","lp","lh","lng","sk","st","sp","sts","sng","sny","sn","sm","rky","sky","skr","spy","spr","rmy","smy","smr")
+hightone_onsets_withw = paste0(c("ky","py","hy","khy","phy","kr","tr","pr","hr","khr","thr","phr","shr","sr","kl","rl","gl","bl","sl","rk","rt","rts","rng","rny","rn","rm","lk","lc","lt","lp","lh","lng","sk","st","sp","sts","sng","sny","sn","sm","rky","sky","skr","spy","spr","rmy","smy","smr"), "w")
 
+hightone_onsets_prefix_g = c("gc","gt","gts","gny","gn","gs","g.y")
+hightone_onsets_prefix_d = c("dk","dp","db","dng","dm") #enleves : "dkr","dpr","dbr","dmr","dkr","dpr","dbr","dmr","dky","dpy","dby","dmy"
+hightone_onsets_prefix_b = c("bk","bc","bt","bts","bsh","bs","bng","bny","bn") #enleves : "brng","bsng","bsny","bsn","brny","brn"
+hightone_onsets_prefix_m = c("mkh","mch","mth","mtsh","mng","mny","mn")
+hightone_onsets_prefix_alow = c("'kh","'ch","'th","'ph","'tsh")
+hightone_onsets_prefix_d = sapply(c("y","r",""), function(subscript) paste0(hightone_onsets_prefix_d, subscript))
+hightone_onsets_prefix_b = sapply(c("y","r",""), function(subscript) paste0(hightone_onsets_prefix_b, subscript))
+hightone_onsets_prefix_m = sapply(c("y","r",""), function(subscript) paste0(hightone_onsets_prefix_m, subscript))
+hightone_onsets_prefix_alow = sapply(c("y","r",""), function(subscript) paste0(hightone_onsets_prefix_alow, subscript))
+hightone_onsets_prefix_b = sapply(c("s","r",""), function(superscript) paste0("b", superscript, substring(hightone_onsets_prefix_b, 2, nchar(hightone_onsets_prefix_b))))
+
+hightone_onsets = unique(c(hightone_single_onsets,hightone_onsets_noprefix,hightone_onsets_prefix_g,hightone_onsets_prefix_d,hightone_onsets_prefix_b,hightone_onsets_prefix_m,hightone_onsets_prefix_alow,hightone_onsets_withw))
+
+tournardre_high_onsets = c("k","kw","dk","bk","rk","lk","sk","brk","bsk","ky","dky","bky","rky","sky","bsky","brky","kr","dkr","bkr","bskr","T","pr","spr","dpr","kl","kh","khw","mkh","'kh","khy","mkhy","'khy","khr","phr","mkhr","'khr","'phr","dng","mng","rng","brng","bsng","lng","sng","c","gc","bc","lc","dpy","spy","ch","phy","mch","'ch","'phy","rny","sny","brny","bsny","dmy","rmy","smy","mny","gny","t","gt","bt","rt","st","brt","bst","lt","blt","th","mth","'th","rn","gn","bn","sn","brn","bsn","snr","mn","p","sp","lp","dp","ph","'ph","phy","phr","rm","sm","dm","smr","ts","gts","bts","rts","sts","brts","bsts","rtsw","tsh","tshw","mtsh","'tsh","db","g.y","dby","dbr","hr","rl","kl","bkl","gl","bl","sl","bsl","lh","sh","shw","gsh","bsh","s","gs","bs","sr","bsr","h","hw","hy","hph","")
+setdiff(tournardre_high_onsets,hightone_onsets)
+all_hightone_onsets = union(tournardre_high_onsets,hightone_onsets)
+all_hightone_onsets = c(all_hightone_onsets,"brl")
+```
+
+
+```{r}
+lowtone_single_onsets = c("g","ng","j","ny","d","n","b","m","dz","w","zh","z","'","y","r","l")
+
+lowtone_onsets_noprefix = c(lowtone_single_onsets,"gy","by","my","gr","dr","br","m","zl","gw","nyw","zhw","zw","rw","lw","rg","rj","rd","rb","rdz","lg","lj","ld","lb","sg","sd","sb","rgy","sgy","sgr","sby","sbr")
+lowtone_onsets_withw = paste0(c("gy","by","my","gr","dr","br","m","zl","rg","rj","rd","rb","rdz","lg","lj","ld","lb","sg","sd","sb","rgy","sgy","sgr","sby","sbr"), "w")
+
+lowtone_onsets_prefix_g = c("gzh","gz","gd")
+lowtone_onsets_prefix_d = c("dg")
+lowtone_onsets_prefix_b = c("bzh","bz","bg","brj","bd","brdz") 
+lowtone_onsets_prefix_m = c("mg","mj","md","mdz")
+lowtone_onsets_prefix_alow = c("'g","'j","'d","'b","'dz")
+lowtone_onsets_prefix_d = sapply(c("y","r",""), function(subscript) paste0(lowtone_onsets_prefix_d, subscript))
+lowtone_onsets_prefix_b = sapply(c("y","r",""), function(subscript) paste0(lowtone_onsets_prefix_b, subscript))
+lowtone_onsets_prefix_m = sapply(c("y","r",""), function(subscript) paste0(lowtone_onsets_prefix_m, subscript))
+lowtone_onsets_prefix_alow = sapply(c("y","r",""), function(subscript) paste0(lowtone_onsets_prefix_alow, subscript))
+lowtone_onsets_prefix_b = sapply(c("s","r",""), function(superscript) paste0("b", superscript, substring(lowtone_onsets_prefix_b, 2, nchar(lowtone_onsets_prefix_b))))
+
+lowtone_onsets = unique(c(lowtone_single_onsets,lowtone_onsets_noprefix,lowtone_onsets_prefix_g,lowtone_onsets_prefix_d,lowtone_onsets_prefix_b,lowtone_onsets_prefix_m,lowtone_onsets_prefix_alow,lowtone_onsets_withw))
+
+tournardre_low_onsets = c("g","rg","dg","bg","sg","brg","bsg","'g","mg","lg","gy","rgy","dgy","bgy","brgy","bsgy","'gy","mgy","gr","grw","dr","br","sgr","dgr","bgr","bsgr","sbr","D","'gr","mgr","'br","'dr","ng","j","by","rj","brj","sby","'j","mj","lj","'by","ny","nyw","my","d","dw","rd","gd","bd","sd","brd","bsd","md","ld","'d","bld","zl","bzl","n","b","rb","sb","'b","lb","m","dz","rdz","brdz","' dz","mdz","'d","mdz","w","zh","gzh","bzh","zhw","z","gz","bz","'","y","r","l","lw")
+setdiff(tournardre_low_onsets,lowtone_onsets)
+all_lowtone_onsets = union(tournardre_low_onsets,lowtone_onsets)
+
+```
+
+'Rule-based' approach I gave up on:
+
+```{r, echo = F}
 hightone_single_onsets = c("k","c","t","p","ts","kh","cg","th","ph","tsh","sh","s","h","")
 nasals = c("ng","ny","n","m")
 prefix_superscript_combos = as.vector(sapply(prefixes, function(prefix) paste0(prefix, superscripts)))
@@ -54,5 +114,76 @@ lowtone_misc = c("dby", "zl")
 lowtone_onsets = setdiff(c(lowtone_onsets_nosub,lowtone_onsets_withsub,lowtone_misc), "sw", "sl", "")
 ```
 
+Extracting tonal information:
+
+```{r}
+onsetsDF = onsetsDF %>% mutate(tone = case_when(onset %in% all_lowtone_onsets ~ "low", onset %in% all_hightone_onsets ~ "high", T ~ "???")) %>% mutate(tone = as.factor(tone))
+onsetsDF %>% group_by(tone) %>% summarise(freq = n())
+onsetsDF %>% filter(tone == "???") %>% group_by(onset) %>% summarise(n())
+```
 
 
+#Processing aspiration
+
+```{r}
+asp_single_onsets = c("kh","ch","th","ph","tsh","h","g","j","d","b","dz")
+asp_onsets_noprefix = c(asp_single_onsets,"hy","khy","phy","hr","khr","thr","phr","hw","khw","tshw","lh","gy","by","gr","dr","br","gw")
+asp_onsets_withw = paste0(c("hy","khy","phy","hr","khr","thr","phr","lh","gy","by","gr","dr","br","gw"), "w")
+
+#asp_onsets_prefix_g = c()
+#asp_onsets_prefix_d = c() 
+#asp_onsets_prefix_b = c() 
+asp_onsets_prefix_m = c("mkh","mch","mth","mtsh")
+asp_onsets_prefix_alow = c("'kh","'ch","'th","'ph","'tsh")
+#asp_onsets_prefix_d = sapply(c("y","r",""), function(subscript) paste0(asp_onsets_prefix_d, subscript))
+#asp_onsets_prefix_b = sapply(c("y","r",""), function(subscript) paste0(asp_onsets_prefix_b, subscript))
+asp_onsets_prefix_m = sapply(c("y","r",""), function(subscript) paste0(asp_onsets_prefix_m, subscript))
+asp_onsets_prefix_alow = sapply(c("y","r",""), function(subscript) paste0(asp_onsets_prefix_alow, subscript))
+#asp_onsets_prefix_b = sapply(c("s","r",""), function(superscript) paste0("b", superscript, substring(asp_onsets_prefix_b, 2, nchar(asp_onsets_prefix_b))))
+
+#asp_onsets = unique(c(asp_single_onsets,asp_onsets_noprefix,asp_onsets_prefix_g,asp_onsets_prefix_d,asp_onsets_prefix_b,asp_onsets_prefix_m,asp_onsets_prefix_alow,asp_onsets_withw))
+asp_onsets = unique(c(asp_single_onsets,asp_onsets_noprefix,asp_onsets_prefix_m,asp_onsets_prefix_alow,asp_onsets_withw))
+
+
+tournardre_asp_onsets = c("kh","khw","mkh","'kh","khy","mkhy","'khy","khr","phr","mkhr","'khr","'phr","g","gy","gr","grw","dr","br","ch","phy","mch","'ch","'phy","j","by","th","mth","'th","d","dw","ph","'ph","b","tsh","tshw","mtsh","'tsh","dz","hr","lh","h","hw","hy")
+setdiff(tournardre_asp_onsets,asp_onsets)
+all_asp_onsets = union(tournardre_asp_onsets,asp_onsets)
+```
+
+> oldextras = union(setdiff(tournardre_low_onsets,lowtone_onsets),setdiff(tournardre_high_onsets,hightone_onsets))
+> setdiff(setdiff(tournardre_nonasp_onsets,nonasp_onsets), oldextras)
+
+```{r}
+
+nonasp_single_onsets = c("k","c","t","p","ts","ng","ny","n","m","w","zh","z","'","y","r","l","sh","s","")
+
+nonasp_onsets_noprefix = c(nonasp_single_onsets,"my","shr","m","sr","zl","nyw","zhw","zw","rw","lw","rg","rj","rd","rb","rdz","lg","lj","ld","lb","sg","sd","sb","rgy","sgy","sgr","sby","sbr","ky","py","kr","tr","pr","shr","sr","kl","rl","gl","bl","sl","kw","cw","tw","tsw","shw","sw","rk","rt","rts","rng","rny","rn","rm","lk","lc","lt","lp","lng","sk","st","sp","sts","sng","sny","sn","sm","rky","sky","skr","spy","spr","rmy","smy","smr")
+nonasp_onsets_withw = paste0(c("my","shr","m","sr","zl","rg","rj","rd","rb","rdz","lg","lj","ld","lb","sg","sd","sb","rgy","sgy","sgr","sby","sbr","ky","py","kr","tr","pr","shr","sr","kl","rl","gl","bl","sl","rk","rt","rts","rng","rny","rn","rm","lk","lc","lt","lp","lng","sk","st","sp","sts","sng","sny","sn","sm","rky","sky","skr","spy","spr","rmy","smy","smr"), "w")
+
+nonasp_onsets_prefix_g = c("gzh","gz","gd","gc","gt","gts","gny","gn","gs","g.y")
+nonasp_onsets_prefix_d = c("dg","dk","dp","db","dng","dm")
+nonasp_onsets_prefix_b = c("bzh","bz","bg","brj","bd","brdz","bk","bc","bt","bts","bsh","bs","bng","bny","bn") 
+nonasp_onsets_prefix_m = c("mg","mj","md","mdz","mng","mny","mn")
+nonasp_onsets_prefix_anonasp = c("'g","'j","'d","'b","'dz")
+nonasp_onsets_prefix_d = sapply(c("y","r",""), function(subscript) paste0(nonasp_onsets_prefix_d, subscript))
+nonasp_onsets_prefix_b = sapply(c("y","r",""), function(subscript) paste0(nonasp_onsets_prefix_b, subscript))
+nonasp_onsets_prefix_m = sapply(c("y","r",""), function(subscript) paste0(nonasp_onsets_prefix_m, subscript))
+nonasp_onsets_prefix_anonasp = sapply(c("y","r",""), function(subscript) paste0(nonasp_onsets_prefix_anonasp, subscript))
+nonasp_onsets_prefix_b = sapply(c("s","r",""), function(superscript) paste0("b", superscript, substring(nonasp_onsets_prefix_b, 2, nchar(nonasp_onsets_prefix_b))))
+
+nonasp_onsets = unique(c(nonasp_single_onsets,nonasp_onsets_noprefix,nonasp_onsets_prefix_g,nonasp_onsets_prefix_d,nonasp_onsets_prefix_b,nonasp_onsets_prefix_m,nonasp_onsets_prefix_anonasp,nonasp_onsets_withw))
+
+tournardre_nonasp_onsets = c("k","kw","dk","bk","rk","lk","sk","brk","bsk","ky","dky","bky","rky","sky","bsky","brky","kr","dkr","bkr","bskr","T","pr","spr","dpr","rg","dg","bg","sg","brg","bsg","'g","mg","lg","rgy","dgy","bgy","brgy","bsgy","'gy","mgy","sgr","dgr","bgr","bsgr","sbr","D","'gr","mgr","'br","'dr","ng","dng","mng","rng","brng","bsng","lng","sng","c","gc","bc","lc","dpy","spy","rj","brj","sby","'j","mj","lj","'by","ny","nyw","my","rny","sny","brny","bsny","dmy","rmy","smy","mny","gny","t","gt","bt","rt","st","brt","bst","lt","blt","rd","gd","bd","sd","brd","bsd","md","ld","'d","bld","zl","bzl","n","rn","gn","bn","sn","brn","bsn","snr","mn","p","sp","lp","dp","rb","sb","'b","lb","m","rm","sm","dm","smr","ts","gts","bts","rts","sts","brts","bsts","rtsw","rdz","brdz","'dz","mdz","w","db","zh","gzh","bzh","zhw","z","gz","bz","'","y","g.y","dby","r","dbr","l","lw","rl","kl","bkl","gl","bl","sl","bsl","sh","shw","gsh","bsh","s","gs","bs","sr","bsr","hph","")
+
+
+setdiff(tournardre_noasp_onsets,noasp_onsets)
+all_noasp_onsets = union(tournardre_noasp_onsets,noasp_onsets)
+```
+
+```{r}
+
+onsetsDF = onsetsDF %>% mutate(asp = case_when(onset %in% all_noasp_onsets ~ "nonasp", onset %in% all_asp_onsets ~ "asp", T ~ "???")) %>% mutate(tone = as.factor(tone))
+onsetsDF %>% group_by(tone) %>% summarise(freq = n())
+onsetsDF %>% filter(tone == "???") %>% group_by(onset) %>% summarise(n())
+
+```
