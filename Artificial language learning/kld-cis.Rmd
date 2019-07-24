@@ -1,0 +1,251 @@
+---
+title: "KLD CIs"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(lme4)
+```
+
+## Import a bunch of things
+Import the data for each learning model:
+
+```{r}
+#setwd("G:/My Drive/Uncertainty estimation with probabilities/Three biases/Three Biases")
+setwd("G:/§Úªº¶³ºÝµwºÐ/Uncertainty estimation with probabilities/Three biases/Three Biases")
+martian1.oo.predictions = read.csv("martian1.oo.predictions.csv")
+martian2.oo.predictions = read.csv("martian2.oo.predictions.csv")
+martian1.gen1.predictions = read.csv("martian1.gen1.predictions.csv")
+martian2.gen1.predictions = read.csv("martian2.gen1.predictions.csv")
+martian1.gen2.predictions = read.csv("martian1.gen2.predictions.csv")
+martian2.gen2.predictions = read.csv("martian2.gen2.predictions.csv")
+martian1.feat.predictions = read.csv("martian1.feat.predictions.csv")
+martian2.feat.predictions = read.csv("martian2.feat.predictions.csv")
+```
+
+Fit the logistic regression model (code below is from the Albright & Do paper):
+
+```{r cars}
+#setwd("G:/My Drive/Uncertainty estimation with probabilities/Three biases/Three Biases")
+setwd("G:/§Úªº¶³ºÝµwºÐ/Uncertainty estimation with probabilities/Three biases/Three Biases")
+exp.generalize.test = read.csv("exp.generalize.all.csv")
+exp.generalize.test$Alternation = factor(exp.generalize.test$Alternation,levels=c("Contin","Voice"))
+exp.generalize.test$Alternation2 = factor(exp.generalize.test$Alternation2,levels=c("Rare Feat","Freq Feat"))
+exp.generalize.test$Place = factor(exp.generalize.test$Place,levels=c("Coronal","Labial"))
+contrasts(exp.generalize.test$Place) = contr.sum(2)
+contrasts(exp.generalize.test$Exp) = -contr.sum(2)
+
+generalize.exp.lmer2 = glmer(Alternation2 ~ Place + Exp + (1 + Place|userCode) + (1|item), data=exp.generalize.test,
+      family=binomial(link="logit"), control = glmerControl(optimizer="bobyqa"))
+```
+
+## Actual analysis
+
+First compute p estimates for four conditions from Model 1, Model 2:
+
+```{r pressure, echo=FALSE}
+library(dplyr)
+extractP = function(predictions, place, alternation){
+  as.matrix(predictions %>% filter(Place == place, Alternation == alternation) %>% select(Prob) / sum(martian1.oo.predictions %>% filter(Place == place, Alternation != "No alternation") %>% select(Prob)))
+}
+
+p_model1_lang1_cor = extractP(martian1.oo.predictions, "Coronal", "Voicing")
+p_model1_lang1_lab = extractP(martian1.oo.predictions, "Labial", "Voicing")
+p_model1_lang2_cor = extractP(martian2.oo.predictions, "Coronal", "Contin")
+p_model1_lang2_lab = extractP(martian2.oo.predictions, "Labial", "Contin")
+p_model1 = c(p_model1_lang1_cor, p_model1_lang1_lab, p_model1_lang2_cor, p_model1_lang2_lab)
+
+p_model2_lang1_cor = extractP(martian1.gen1.predictions, "Coronal", "Voicing")
+p_model2_lang1_lab = extractP(martian1.gen1.predictions, "Labial", "Voicing")
+p_model2_lang2_cor = extractP(martian2.gen1.predictions, "Coronal", "Contin")
+p_model2_lang2_lab = extractP(martian2.gen1.predictions, "Labial", "Contin")
+p_model2 = c(p_model2_lang1_cor, p_model2_lang1_lab, p_model2_lang2_cor, p_model2_lang2_lab)
+
+p_model3_lang1_cor = extractP(martian1.gen2.predictions, "Coronal", "Voicing")
+p_model3_lang1_lab = extractP(martian1.gen2.predictions, "Labial", "Voicing")
+p_model3_lang2_cor = extractP(martian2.gen2.predictions, "Coronal", "Contin")
+p_model3_lang2_lab = extractP(martian2.gen2.predictions, "Labial", "Contin")
+p_model3 = c(p_model3_lang1_cor, p_model3_lang1_lab, p_model3_lang2_cor, p_model3_lang2_lab)
+
+p_model4_lang1_cor = extractP(martian1.feat.predictions, "Coronal", "Voicing")
+p_model4_lang1_lab = extractP(martian1.feat.predictions, "Labial", "Voicing")
+p_model4_lang2_cor = extractP(martian2.feat.predictions, "Coronal", "Contin")
+p_model4_lang2_lab = extractP(martian2.feat.predictions, "Labial", "Contin")
+p_model4 = c(p_model4_lang1_cor, p_model4_lang1_lab, p_model4_lang2_cor, p_model4_lang2_lab)
+```
+
+Extract point estimates of p's in the four conditions from the model:
+
+```{r}
+beta = generalize.exp.lmer2@beta
+p_lr_lang1_cor = 1 / (exp(-beta[1] - beta[2] + beta[3]) + 1)
+p_lr_lang1_lab = 1 / (exp(-beta[1] + beta[2] + beta[3]) + 1)
+p_lr_lang2_cor = 1 / (exp(-beta[1] - beta[2] - beta[3]) + 1)
+p_lr_lang2_lab = 1 / (exp(-beta[1] + beta[2] - beta[3]) + 1)
+p_lr = c(p_lr_lang1_cor, p_lr_lang1_lab, p_lr_lang2_cor, p_lr_lang2_lab)
+```
+
+
+
+Now we have all the materials required to compute the KLDs:
+
+```{r}
+computeKLD = function(p, p_lr){
+  p * log(p / p_lr, 2) + (1 - p) * log((1 - p) / (1 - p_lr), 2)
+}
+
+kld_model1_lang1_cor = computeKLD(p_model1[1], p_lr[1])
+kld_model1_lang1_lab = computeKLD(p_model1[2], p_lr[2])
+kld_model1_lang2_cor = computeKLD(p_model1[3], p_lr[3])
+kld_model1_lang2_lab = computeKLD(p_model1[4], p_lr[4])
+kld_model1 = c(kld_model1_lang1_cor, kld_model1_lang1_lab, kld_model1_lang2_cor, kld_model1_lang2_lab)
+kld_model1_mean = mean(kld_model1)
+
+kld_model2_lang1_cor = computeKLD(p_model2[1], p_lr[1])
+kld_model2_lang1_lab = computeKLD(p_model2[2], p_lr[2])
+kld_model2_lang2_cor = computeKLD(p_model2[3], p_lr[3])
+kld_model2_lang2_lab = computeKLD(p_model2[4], p_lr[4])
+kld_model2 = c(kld_model2_lang1_cor, kld_model2_lang1_lab, kld_model2_lang2_cor, kld_model2_lang2_lab)
+kld_model2_mean = mean(kld_model2)
+
+kld_model3_lang1_cor = computeKLD(p_model3[1], p_lr[1])
+kld_model3_lang1_lab = computeKLD(p_model3[2], p_lr[2])
+kld_model3_lang2_cor = computeKLD(p_model3[3], p_lr[3])
+kld_model3_lang2_lab = computeKLD(p_model3[4], p_lr[4])
+kld_model3 = c(kld_model3_lang1_cor, kld_model3_lang1_lab, kld_model3_lang2_cor, kld_model3_lang2_lab)
+kld_model3_mean = mean(kld_model3)
+
+kld_model4_lang1_cor = computeKLD(p_model4[1], p_lr[1])
+kld_model4_lang1_lab = computeKLD(p_model4[2], p_lr[2])
+kld_model4_lang2_cor = computeKLD(p_model4[3], p_lr[3])
+kld_model4_lang2_lab = computeKLD(p_model4[4], p_lr[4])
+kld_model4 = c(kld_model4_lang1_cor, kld_model4_lang1_lab, kld_model4_lang2_cor, kld_model4_lang2_lab)
+kld_model4_mean = mean(kld_model4)
+
+diffs = kld_model4_mean - c(kld_model1_mean, kld_model2_mean, kld_model3_mean)
+klds = c(kld_model1, kld_model2, kld_model3, kld_model4)
+```
+
+
+Now for statistical inference. We have eight KLDs (so far), and they are computed using four estimated values from the logistic regression model. Let's start with the derivatives of the KLDs with respect to the p's
+
+```{r}
+computeKLDDer = function(p, p_lr){
+   (log(2))^(-1) * ((1 - p) / (1 - p_lr) - p / p_lr)
+}
+
+dklddpi_model1_lang1_cor = computeKLDDer(p_model1[1], p_lr[1])
+dklddpi_model1_lang1_lab = computeKLDDer(p_model1[2], p_lr[2])
+dklddpi_model1_lang2_cor = computeKLDDer(p_model1[3], p_lr[3])
+dklddpi_model1_lang2_lab = computeKLDDer(p_model1[4], p_lr[4])
+
+dklddpi_model2_lang1_cor = computeKLDDer(p_model2[1], p_lr[1])
+dklddpi_model2_lang1_lab = computeKLDDer(p_model2[2], p_lr[2])
+dklddpi_model2_lang2_cor = computeKLDDer(p_model2[3], p_lr[3])
+dklddpi_model2_lang2_lab = computeKLDDer(p_model2[4], p_lr[4])
+
+dklddpi_model3_lang1_cor = computeKLDDer(p_model3[1], p_lr[1])
+dklddpi_model3_lang1_lab = computeKLDDer(p_model3[2], p_lr[2])
+dklddpi_model3_lang2_cor = computeKLDDer(p_model3[3], p_lr[3])
+dklddpi_model3_lang2_lab = computeKLDDer(p_model3[4], p_lr[4])
+
+dklddpi_model4_lang1_cor = computeKLDDer(p_model4[1], p_lr[1])
+dklddpi_model4_lang1_lab = computeKLDDer(p_model4[2], p_lr[2])
+dklddpi_model4_lang2_cor = computeKLDDer(p_model4[3], p_lr[3])
+dklddpi_model4_lang2_lab = computeKLDDer(p_model4[4], p_lr[4])
+
+dklddp = rbind(diag(c(dklddpi_model1_lang1_cor, dklddpi_model1_lang1_lab, dklddpi_model1_lang2_cor, dklddpi_model1_lang2_lab)),
+               diag(c(dklddpi_model2_lang1_cor, dklddpi_model2_lang1_lab, dklddpi_model2_lang2_cor, dklddpi_model2_lang2_lab)),
+               diag(c(dklddpi_model3_lang1_cor, dklddpi_model3_lang1_lab, dklddpi_model3_lang2_cor, dklddpi_model3_lang2_lab)),
+               diag(c(dklddpi_model4_lang1_cor, dklddpi_model4_lang1_lab, dklddpi_model4_lang2_cor, dklddpi_model4_lang2_lab)))
+
+
+```
+
+Now derivatives of the p's with respect to the beta's:
+
+```{r}
+#Note: The meanings of sign1, sign2, sign3, etc. are different from the sgn functions in the paper
+computePDer = function(sign1, sign2, sign3){
+  -(exp(-beta[1] + sign1 * beta[2] + sign2 * beta[3]) + 1)^(-2) * exp(-beta[1] + sign1 * beta[2] + sign2 * beta[3]) * sign3
+}
+
+p_lr_lang1_cor = 1 / (exp(-beta[1] - beta[2] + beta[3]) + 1)
+p_lr_lang1_lab = 1 / (exp(-beta[1] + beta[2] + beta[3]) + 1)
+p_lr_lang2_cor = 1 / (exp(-beta[1] - beta[2] - beta[3]) + 1)
+p_lr_lang2_lab = 1 / (exp(-beta[1] + beta[2] - beta[3]) + 1)
+
+
+dp1dbeta = c(computePDer(-1,  1, -1), computePDer(-1,  1, -1), computePDer(-1,  1,  1))
+dp2dbeta = c(computePDer( 1,  1, -1), computePDer( 1,  1,  1), computePDer( 1,  1,  1))
+dp3dbeta = c(computePDer(-1, -1, -1), computePDer(-1, -1, -1), computePDer(-1, -1, -1))
+dp4dbeta = c(computePDer( 1, -1, -1), computePDer( 1, -1,  1), computePDer( 1, -1, -1))
+dpdbeta = rbind(dp1dbeta, dp2dbeta, dp3dbeta, dp4dbeta)
+```
+
+Now let's put everything together:
+
+```{r}
+pm = function(a, b) rbind(a-b, a+b)
+varbetahat = vcov(generalize.exp.lmer2)
+dklddbeta = dklddp %*% dpdbeta
+varkld = dklddbeta %*% varbetahat %*% t(dklddbeta)
+C = matrix(c(rep(-1/4, 4), rep(1/4, 4),    rep(0, 4),      rep(0, 4),
+             rep(-1/4, 4), rep(0, 4),      rep(1/4, 4),    rep(0, 4),
+             rep(0, 4),    rep(-1/4, 4),   rep(1/4, 4),    rep(0, 4),
+             rep(0, 4),    rep(-1/4, 4),   rep(0, 4),      rep(1/4, 4),
+             rep(0, 4),    rep(0, 4),      rep(-1/4, 4),   rep(1/4, 4)
+      ), nrow = 5, byrow = T)
+diffs = C %*% klds
+vardiff = as.matrix(C %*% varkld %*% t(C))
+ses = sqrt(diag(vardiff))
+CIs = pm(t(diffs), qnorm(1 - .05 / 10) * ses)
+colnames(CIs) = c("1 vs 2", "1 vs 3", "2 vs 3", "2 vs 4", "3 vs 4")
+```
+
+Print stuff out for the paper:
+
+```{r}
+library(xtable)
+printLatexTable = function(matrix){
+  print(xtable(matrix,align=rep("",ncol(matrix)+1), digits = 4, display = rep("g", 1 + ncol(matrix))),include.rownames = FALSE, include.colnames = FALSE, floating=FALSE, tabular.environment="bmatrix", hline.after=NULL)
+}
+printCIs = function(low, up){
+  cis = paste0("(", signif(low, 4), ", ", signif(up, 4), ")")
+  paste(cis, collapse = ", ")
+}
+printVector = function(vec) paste("(",paste(signif(vec, 4), collapse=", "),")", sep="")
+printVector(diffs)
+printLatexTable(as.matrix(vardiff))
+printCIs(CIs[1,],CIs[2,])
+```
+
+```{r}
+library(reshape2)
+grouped = (exp.generalize.test %>% filter(!is.na(Alternation2)) %>% group_by(userCode, Place, Exp, Alternation2) %>% summarise(no = n()))
+rarefreq = grouped %>% dcast(userCode + Place + Exp ~ Alternation2, sum, value.var = "no", margins = c("userCode", "Alternation2"))
+colnames(rarefreq) = c("userCode","Place", "Exp", "rareFeat","freqFeat","all")
+rarefreq = rarefreq %>% mutate(perc = freqFeat / (freqFeat + rareFeat))
+mean(rarefreq %>% filter(Place == "Coronal", Exp == "Exp1") %>% select(perc))
+mean(rarefreq %>% filter(Place == "Labial", Exp == "Exp1") %>% select(perc))
+mean(rarefreq %>% filter(Place == "Coronal", Exp == "Exp2") %>% select(perc))
+mean(rarefreq %>% filter(Place == "Labial", Exp == "Exp2") %>% select(perc))
+
+ungrouped = (exp.generalize.test %>% filter(!is.na(Alternation2)) %>% group_by(Place, Exp, Alternation2) %>% summarise(no = n()))
+rarefreq = ungrouped %>% dcast(Place + Exp ~ Alternation2, sum, value.var = "no")
+colnames(rarefreq) = c("Place", "Exp", "rareFeat","freqFeat","all")
+rarefreq = rarefreq %>% mutate(perc = freqFeat / (freqFeat + rareFeat))
+
+```
+
+## Simulation studies
+
+```{r}
+library(dplyr)
+exp.generalize.test %>% group_by(userCode) %>% summarise(no = n())
+```

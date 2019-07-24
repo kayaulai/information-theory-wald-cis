@@ -1,0 +1,109 @@
+---
+title: "Classical Chinese - extraction"
+author: "Lai Ka Yau"
+date: "July 15, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+setwd("G:/My Drive/Uncertainty estimation with probabilities/Classical Chinese")
+library(XML)
+library(methods)
+library(dplyr)
+```
+
+## XML stuff
+
+Import the Zuozhuan:
+
+```{r}
+parsedXMLZuo = xmlParse(file = "Wikisource-zuozhuan.xml", encoding = "UTF-8")
+xmlRootNodeZuo = xmlRoot(parsedXMLZuo)[-1]
+getDFFromPageZZ = function(page){
+  titles = strsplit(xmlValue(page[[1]][["title"]][1]$text), "/")
+  book = titles[[1]][1]
+  duke = titles[[1]][2]
+  wikitext = xmlValue(page[[1]][["revision"]][["text"]])
+  wikitext = strsplit(wikitext, "(\n)+")[[1]]
+  sectionHeaders = c(grep("==.*==", wikitext), length(wikitext)+1)
+  section_dfs = lapply(1:(length(sectionHeaders)-1), function(x){
+    potentialParagraphs = wikitext[(sectionHeaders[x]+1):(sectionHeaders[x+1]-1)]
+    potentialParagraphs = potentialParagraphs[potentialParagraphs != "----"]
+    potentialParagraphs = potentialParagraphs[!(potentialParagraphs %in% c("經","傳"))]
+    potentialParagraphs = potentialParagraphs[!(nchar(potentialParagraphs) == 1)]
+    remove_regex = c("[經|傳].*年.","'''[經|傳]'''","\\{\\{header2\\\n\\|previous=","\\|next=","\\{\\{PD-old\\}\\}","\\|next=)","\\[\\[Category:春秋左氏傳\\|\\d*\\]\\]","\\[\\[ja:春秋左氏傳\\/.*\\]\\]","\\{\\{footer","\\|previous=\\[\\[..\\/.*\\|.*\\]\\]","\\[\\.\\..*\\|下一篇\\]\\]")
+    jingzhuan_complex = Reduce(c, sapply(remove_regex, function(x) grep(x, potentialParagraphs)))
+    if(length(jingzhuan_complex) >= 1) potentialParagraphs = potentialParagraphs[-jingzhuan_complex]
+    data.frame(book,duke,section =sub(("==(.*)=="),"\\1", wikitext[sectionHeaders[x]]),para= 1:length(potentialParagraphs),paraText = potentialParagraphs)
+  })
+  Reduce(rbind, section_dfs)
+}
+
+zz_df = Reduce(rbind, lapply(1:length(xmlRootNodeZuo), function(page) getDFFromPageZZ(xmlRootNodeZuo[page])))
+
+```
+
+Import the Guliang Zhuan:
+
+```{r}
+parsedXMLGu = xmlParse(file = "Wikisource-guliang.xml", encoding = "UTF-8")
+xmlRootNodeGu = xmlRoot(parsedXMLGu)[-1]
+getDFFromPageGLZ = function(page){
+  titles = strsplit(xmlValue(page[[1]][["title"]][1]$text), "/")
+  book = titles[[1]][1]
+  duke = titles[[1]][2]
+  wikitext = xmlValue(page[[1]][["revision"]][["text"]])
+  wikitext = strsplit(wikitext, "(\n)+")[[1]]
+  sectionHeaders = c(grep("==.*==", wikitext), length(wikitext)+1)
+  section_dfs = lapply(1:(length(sectionHeaders)-1), function(x){
+    potentialParagraphs = wikitext[(sectionHeaders[x]+1):(sectionHeaders[x+1]-1)]
+    potentialParagraphs = potentialParagraphs[potentialParagraphs != "----"]
+    potentialParagraphs = potentialParagraphs[!(potentialParagraphs %in% c("經","傳"))]
+    potentialParagraphs = potentialParagraphs[!(nchar(potentialParagraphs) == 1)]
+    remove_regex = c("[經|傳].*年.","'''[經|傳]'''","\\{\\{header2\\\n\\|previous=","\\|next=","\\{\\{PD-old\\}\\}","\\|next=)","\\[\\[Category:春秋穀梁傳\\|\\d*\\]\\]","\\[\\[ja:春秋穀梁傳\\/.*\\]\\]","\\{\\{footer","\\|previous=\\[\\[..\\/.*\\|.*\\]\\]","\\[\\.\\..*\\|下一篇\\]\\]")
+    jingzhuan_complex = Reduce(c, sapply(remove_regex, function(x) grep(x, potentialParagraphs)))
+    if(length(jingzhuan_complex) >= 1) potentialParagraphs = potentialParagraphs[-jingzhuan_complex]
+    data.frame(book,duke,section =sub(("==(.*)=="),"\\1", wikitext[sectionHeaders[x]]),para= 1:length(potentialParagraphs),paraText = potentialParagraphs)
+  })
+  Reduce(rbind, section_dfs)
+}
+
+GLZ_df = Reduce(rbind, lapply(1:length(xmlRootNodeGu), function(page) getDFFromPageGLZ(xmlRootNodeGu[page])))
+comb_df = rbind(zz_df, GLZ_df)
+comb_df$paraText = as.character(comb_df$paraText)
+```
+
+Find bu/fu clauses:
+
+```{r cars}
+findClause = function(para, pos){
+  tail = substring(para, pos, nchar(para))
+  endpos = regexpr("[。|，|；|：|！|？|．]",tail)
+  if(endpos != -1) cutoff = endpos - 1 else cutoff = nchar(tail)
+  punctBefore = gregexpr("[。|，|；|：|！|？|．]", substring(para, 1, pos))[[1]]
+  startpos = punctBefore[length(punctBefore)]
+  if(startpos != -1) start = startpos + 1 else start = 1
+  substring(para, start, pos - 1 + cutoff)
+}
+getNegsFromRow = function(row){
+  result = data.frame()
+  para = row["paraText"]
+  buPos = gregexpr("不",para)[[1]]
+  fuPos = gregexpr("弗",para)[[1]]
+  bufuPos = sort(setdiff(union(buPos, fuPos), -1))
+  negator = sapply(bufuPos, function(x) switch(2 - x %in% buPos, "不","弗"))
+  clause = sapply(bufuPos, function(x) findClause(para, x))
+  if(length(bufuPos) > 0) result = cbind(t(row), data.frame(bufuPos, negator, clause))
+  result
+}
+clauseTable = Reduce(rbind, apply(comb_df, 1, getNegsFromRow))
+clauseTable = clauseTable %>% mutate(verb = substring(clause,regexpr("[不|弗]",clause)+1,regexpr("[不|弗]",clause)+1))
+write.csv(clauseTable, "clausetable-old.csv")
+```
+
+
+
