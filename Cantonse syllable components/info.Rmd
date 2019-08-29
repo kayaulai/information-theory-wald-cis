@@ -115,10 +115,20 @@ cmatrix = t(matrix(c(1,-1,0,0,
                      0,0,1,-1),nrow=4))
 var_diffs_monosyl = cmatrix %*% var_monosyl %*% t(cmatrix)
 
+printLatexTable = function(matrix){
+  print(xtable(matrix,align=rep("",ncol(matrix)+1), digits = 4, display = rep("g", 1 + ncol(matrix))),include.rownames = FALSE, include.colnames = FALSE, floating=FALSE, tabular.environment="bmatrix", hline.after=NULL)
+}
+
 #CIs
 estimates_diffs = cmatrix %*% estimates
-estimates_diffs - qnorm(1-.05/6) * sqrt(diag(var_diffs_monosyl))
-estimates_diffs + qnorm(1-.05/6) * sqrt(diag(var_diffs_monosyl))
+lower = estimates_diffs - qnorm(1-.05/12) * sqrt(diag(var_diffs_monosyl))
+upper = estimates_diffs + qnorm(1-.05/12) * sqrt(diag(var_diffs_monosyl))
+
+printCIs = function(low, up){
+  cis = paste0("(", signif(low, 4), ", ", signif(up, 4), ")")
+  print(cis, collapse = ", ")
+}
+printCIs(lower, upper)
 ```
 
 ```{r}
@@ -129,8 +139,6 @@ cum = sapply(1:nrow(aps_aug), function(x) sum(aps_aug$count[1:x])/sum(aps_aug$co
 
 
 ## Verifying the formula with a fake corpus
-
-
 
 ```{r}
 getEntropyFromFreqs = function(data){
@@ -227,8 +235,8 @@ getCIsFromFakeCorpus = function(aps_aug_fake, estimates_diffs, cmatrix, n){
   var_diffs = cmatrix %*% var %*% t(cmatrix)
 
   #CIs
-  lower = estimates_diffs - qnorm(0.9916667) * sqrt(diag(var_diffs))
-  upper = estimates_diffs + qnorm(0.9916667) * sqrt(diag(var_diffs))
+  lower = estimates_diffs - qnorm(1-.05/12) * sqrt(diag(var_diffs))
+  upper = estimates_diffs + qnorm(1-.05/12) * sqrt(diag(var_diffs))
   print("Done one cycle")
   c(lower, upper)
 }
@@ -243,8 +251,6 @@ coveragesSep = apply(coverages, 1, function(row) mean(row))
 
 
 ```{r}
-
-
 confints_ests = data.frame(t(cis))
 confints_ests = confints_ests %>% mutate(on_contain = (onlower <= estimates_diffs[1] & onupper >= estimates_diffs[1])) %>% mutate(nc_contain = (nclower <= estimates_diffs[2] & ncupper >= estimates_diffs[2])) %>% mutate(ct_contain = (ctlower <= estimates_diffs[3] & ctupper >= estimates_diffs[3])) %>% mutate(all = on_contain & nc_contain & ct_contain)
 summary(confints_ests$all)
@@ -266,12 +272,13 @@ aps.wf = read.csv("all_syls_withfile.csv") %>% mutate(syl = paste0(o,n,c,t)) %>%
 
 
 ```{r}
-#multinom(syl ~ file, aps.wf)
+multinom(syl ~ file, aps.wf)
 #Neither of these worked:
-#softmax_re_model = mblogit(syl ~ 1, aps.wf, random = ~ 1 | file) - memory issues
-#softmax_re_model = brm(syl ~ 1 + (1|file), aps.wf, categorical(link="logit")) - can't compile
+softmax_re_model = mblogit(syl ~ 1, aps.wf %>% filter(as.numeric(file) %in% 1:5), random = ~ 1 | file)
+softmax_re_model = brm(syl ~ 1 + (1|file), aps.wf %>% filter(as.numeric(file) %in% 1:5), categorical(link="logit")) 
 ```
 
+;;;
 ##Simulation with words
 Import words version of the data, compute counts and probs:
 
@@ -350,8 +357,16 @@ getCIsFromFakeCorpus(fakeCorpora_w[[1]],simEntropyEstimates_w[[1]], cmatrix, 155
 clusterExport(cl, c("getCIsFromFakeCorpus", "fakeCorpora", "simEntropyEstimates","findFisher","n","cmatrix"))
 simEntropyCIs_w = sapply(1:length(fakeCorpora_w), function(x) getCIsFromFakeCorpus(fakeCorpora_w[[x]], simEntropyEstimates_w[[x]], cmatrix, n))
 coverages_w = apply(simEntropyCIs_w, 2, function(col) (col[1:6] <= trueEntropies) & (col[7:12] >= trueEntropies))
-coverageOverall = apply(coverages_w, 2, function(col) all(col))
-coveragesSep = apply(coverages_w, 1, function(row) mean(row))
+coverageOverall_w = apply(coverages_w, 2, function(col) all(col))
+coveragesSep_w = apply(coverages_w, 1, function(row) mean(row))
+
+shapiro.test(simEntropiesMatrix_w[,1])
+shapiro.test(simEntropiesMatrix_w[,2])
+shapiro.test(simEntropiesMatrix_w[,3])
+shapiro.test(simEntropiesMatrix_w[,4])
+shapiro.test(simEntropiesMatrix_w[,5])
+shapiro.test(simEntropiesMatrix_w[,6])
+
 ```
 
 

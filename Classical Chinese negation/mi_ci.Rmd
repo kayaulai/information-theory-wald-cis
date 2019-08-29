@@ -1,0 +1,569 @@
+---
+title: "Conditional entropy"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Set up libraries, import data
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(numDeriv)
+setwd("G:/我的雲端硬碟/Uncertainty estimation with probabilities/Classical Chinese")
+```
+
+```{r}
+library(xtable)
+printLatexTable = function(matrix){
+  print(xtable(matrix,align=rep("",ncol(matrix)+1), digits = 4, display = rep("g", 1 + ncol(matrix))),include.rownames = FALSE, include.colnames = FALSE, floating=FALSE, tabular.environment="bmatrix", hline.after=NULL)
+}
+printCIs = function(low, up){
+  cis = paste0("(", signif(low, 4), ", ", signif(up, 4), ")")
+  paste(cis, collapse = ", ")
+}
+```
+
+```{r}
+setwd("G:/我的雲端硬碟/Uncertainty estimation with probabilities/Classical Chinese")
+clausetable = read_csv("clauses-processed.csv") %>% select(-"adj") %>%
+              filter(!(remark %in% c("不如","不亦","不然")) & !is.na(verb))
+```
+
+Setting up data frames
+```{r}
+clausetable_gu = clausetable %>% filter(book == "春秋穀梁傳")
+clausetable_zuo = clausetable %>% filter(book == "春秋左氏傳")
+n_gu = nrow(clausetable_gu)
+n_zuo = nrow(clausetable_zuo)
+
+clausetable_gu_neg = clausetable_gu %>% group_by(negator) %>% summarise(p = n()/n_gu)
+clausetable_gu_verb = clausetable_gu %>% group_by(verb) %>% summarise(p = n()/n_gu)
+clausetable_gu_nv = clausetable_gu %>% group_by(negator, verb) %>% summarise(p = n()/n_gu) %>%
+  inner_join(clausetable_gu_neg, by = "negator", suffix = c("_joint", "_neg")) %>%
+  inner_join(clausetable_gu_verb, by = "verb") %>% rename(p_verb = p)
+
+clausetable_zuo_neg = clausetable_zuo %>% group_by(negator) %>% summarise(p = n()/n_zuo)
+clausetable_zuo_verb = clausetable_zuo %>% group_by(verb) %>% summarise(p = n()/n_zuo)
+clausetable_zuo_nv = clausetable_zuo %>% group_by(negator, verb) %>% summarise(p = n()/n_zuo) %>%
+  inner_join(clausetable_zuo_neg, by = "negator", suffix = c("_joint", "_neg")) %>%
+  inner_join(clausetable_zuo_verb, by = "verb") %>% rename(p_verb = p)
+```
+
+## Normalised MI
+
+Unnormalised overall quantities:
+
+```{r}
+zuo_mi = sum(clausetable_zuo_nv$p_joint * log(clausetable_zuo_nv$p_joint / (clausetable_zuo_nv$p_neg * clausetable_zuo_nv$p_verb), 2))
+zuo_neg_ent = -sum(clausetable_zuo_neg$p * log(clausetable_zuo_neg$p, 2))
+zuo_verb_ent = -sum(clausetable_zuo_verb$p * log(clausetable_zuo_verb$p, 2))
+zuo_verb_given_neg_ent = -sum(clausetable_zuo_nv$p_joint * log(clausetable_zuo_nv$p_joint / (clausetable_zuo_nv$p_neg), 2))
+zuo_neg_given_verb_ent = -sum(clausetable_zuo_nv$p_joint * log(clausetable_zuo_nv$p_joint / (clausetable_zuo_nv$p_verb), 2))
+zuo_joint_ent = -sum(clausetable_zuo_nv$p_joint * log(clausetable_zuo_nv$p_joint, 2))
+
+gu_mi = sum(clausetable_gu_nv$p_joint * log(clausetable_gu_nv$p_joint / (clausetable_gu_nv$p_neg * clausetable_gu_nv$p_verb), 2))
+gu_neg_ent = -sum(clausetable_gu_neg$p * log(clausetable_gu_neg$p, 2))
+gu_verb_ent = -sum(clausetable_gu_verb$p * log(clausetable_gu_verb$p, 2))
+gu_verb_given_neg_ent = -sum(clausetable_gu_nv$p_joint * log(clausetable_gu_nv$p_joint / (clausetable_gu_nv$p_neg), 2))
+gu_neg_given_verb_ent = -sum(clausetable_gu_nv$p_joint * log(clausetable_gu_nv$p_joint / (clausetable_gu_nv$p_verb), 2))
+gu_joint_ent = -sum(clausetable_gu_nv$p_joint * log(clausetable_gu_nv$p_joint, 2))
+```
+
+Normalised quantities:
+```{r}
+zuo_mi_div_neg_ent = zuo_mi / zuo_neg_ent
+gu_mi_div_neg_ent = gu_mi / gu_neg_ent
+zuo_mi_div_neg_ent-gu_mi_div_neg_ent
+```
+
+MI derivatives:
+
+```{r}
+zuo_row_I = clausetable_zuo_nv[nrow(clausetable_zuo_nv),]
+zuo_log_rowI = log(zuo_row_I$p_neg)  + log(zuo_row_I$p_verb) - log(zuo_row_I$p_joint)#Log terms related to row I
+clausetable_zuo_nv_with_log_self = clausetable_zuo_nv[-nrow(clausetable_zuo_nv),] %>% ungroup() %>% mutate(log_self = log(p_joint) - log(p_neg) -log(p_verb)) %>%
+  mutate(mi_der = (log_self + zuo_log_rowI) / log(2))
+zuo_mi_der = clausetable_zuo_nv_with_log_self$mi_der
+#mi_p1_der = (log(clausetable_zuo_nv_with_log_self$p_joint) - log(zuo_row_I$p_joint))/ log(2)
+#mi_p2_der = (log(clausetable_zuo_nv_with_log_self$p_neg) - log(zuo_row_I$p_neg))/ log(2)
+#mi_p3_der = (log(clausetable_zuo_nv_with_log_self$p_verb) - log(zuo_row_I$p_verb))/ log(2)
+
+zuo_theta = clausetable_zuo_nv[-nrow(clausetable_zuo_nv),]$p_joint
+mi_for_numDeriv = function(theta, clausetable_nv){
+  clausetable_nv = clausetable_nv %>% ungroup() %>% select(-c("p_neg","p_verb","p_joint")) %>% mutate(p_joint = c(theta, 1 - sum(theta)))
+  clausetable_neg = clausetable_nv %>% group_by(negator) %>% summarise(p_neg = sum(p_joint)) %>% ungroup()
+  clausetable_verb = clausetable_nv %>% group_by(verb) %>% summarise(p_verb = sum(p_joint)) %>% ungroup()
+  clausetable_nv = clausetable_nv %>%
+  inner_join(clausetable_neg, by = "negator", suffix = c("_joint", "_neg")) %>%
+  inner_join(clausetable_verb, by = "verb")
+  sum(clausetable_nv$p_joint * log(clausetable_nv$p_joint / (clausetable_nv$p_neg * clausetable_nv$p_verb), 2))
+}
+zuo_mi_numDeriv = mi_for_numDeriv(zuo_theta, clausetable_zuo_nv)
+zuo_mi_der_numDeriv = jacobian(function(x) mi_for_numDeriv(x, clausetable_zuo_nv), zuo_theta)
+
+#Stuff previously used for componentwise comparison
+#mi_parts_for_numDeriv = function(theta, clausetable_nv){
+#  clausetable_nv = clausetable_nv %>% ungroup() %>% select(-c("p_neg","p_verb","p_joint")) %>% mutate(p_joint = c(theta, 1 - sum(theta)))
+#  clausetable_neg = clausetable_nv %>% group_by(negator) %>% summarise(p_neg = sum(p_joint)) %>% ungroup()
+#  clausetable_verb = clausetable_nv %>% group_by(verb) %>% summarise(p_verb = sum(p_joint)) %>% ungroup()
+#  clausetable_nv = clausetable_nv %>%
+#  inner_join(clausetable_neg, by = "negator", suffix = c("_joint", "_neg")) %>%
+#  inner_join(clausetable_verb, by = "verb")
+#  c(sum(clausetable_nv$p_joint * log(clausetable_nv$p_joint, 2)),
+#    -sum(clausetable_nv$p_joint * log(clausetable_nv$p_neg, 2)),
+#    -sum(clausetable_nv$p_joint * log(clausetable_nv$p_verb, 2)))
+#}
+#zuo_mi_parts_der = jacobian(function(x) mi_parts_for_numDeriv(x, clausetable_zuo_nv), zuo_theta)
+
+gu_row_I = clausetable_gu_nv[nrow(clausetable_gu_nv),]
+gu_log_rowI = log(gu_row_I$p_neg)  + log(gu_row_I$p_verb) - log(gu_row_I$p_joint)#Log terms related to row I
+clausetable_gu_nv_with_log_self = clausetable_gu_nv[-nrow(clausetable_gu_nv),] %>% ungroup() %>% mutate(log_self = log(p_joint) - log(p_neg) -log(p_verb)) %>%
+  mutate(mi_der = (log_self + gu_log_rowI) / log(2))
+gu_mi_der = clausetable_gu_nv_with_log_self$mi_der
+
+gu_theta = clausetable_gu_nv[-nrow(clausetable_gu_nv),]$p_joint
+gu_mi_numDeriv = mi_for_numDeriv(gu_theta, clausetable_gu_nv)
+gu_mi_der_numDeriv = jacobian(function(x) mi_for_numDeriv(x, clausetable_gu_nv), gu_theta)
+```
+
+Entropy derivatives:
+
+```{r}
+zuo_neg_ent_der = ((- log(clausetable_zuo_nv$p_neg) + log(zuo_row_I$p_neg)) / log(2))
+zuo_neg_ent_der = zuo_neg_ent_der[-length(zuo_neg_ent_der)]
+
+
+neg_ent_for_numDeriv = function(theta, clausetable_nv){
+  clausetable_nv = clausetable_nv %>% ungroup() %>% select(-c("p_neg","p_verb","p_joint")) %>% mutate(p_joint = c(theta, 1 - sum(theta)))
+  clausetable_neg = clausetable_nv %>% group_by(negator) %>% summarise(p_neg = sum(p_joint)) %>% ungroup()
+  -sum(clausetable_neg$p_neg * log(clausetable_neg$p_neg, 2))
+}
+zuo_neg_ent_der_numDeriv = jacobian(function(x) neg_ent_for_numDeriv(x, clausetable_zuo_nv), zuo_theta)
+
+gu_neg_ent_der = ((- log(clausetable_gu_nv$p_neg) + log(gu_row_I$p_neg)) / log(2))
+gu_neg_ent_der = gu_neg_ent_der[-length(gu_neg_ent_der)]
+gu_neg_ent_der_numDeriv = jacobian(function(x) neg_ent_for_numDeriv(x, clausetable_gu_nv), gu_theta)
+
+```
+
+Normalised MI derivatives:
+
+```{r}
+zuo_mi_div_neg_ent_der = (zuo_mi_der * zuo_neg_ent - zuo_neg_ent_der * zuo_mi) / zuo_neg_ent^2
+mi_div_neg_ent_for_numDeriv = function(theta, clausetable_nv){
+  clausetable_nv = clausetable_nv %>% ungroup() %>% select(-c("p_neg","p_verb","p_joint")) %>% mutate(p_joint = c(theta, 1 - sum(theta)))
+  clausetable_neg = clausetable_nv %>% group_by(negator) %>% summarise(p_neg = sum(p_joint)) %>% ungroup()
+  clausetable_verb = clausetable_nv %>% group_by(verb) %>% summarise(p_verb = sum(p_joint)) %>% ungroup()
+  clausetable_nv = clausetable_nv %>%
+  inner_join(clausetable_neg, by = "negator", suffix = c("_joint", "_neg")) %>%
+  inner_join(clausetable_verb, by = "verb")
+  sum(clausetable_nv$p_joint * log(clausetable_nv$p_joint / (clausetable_nv$p_neg * clausetable_nv$p_verb), 2)) /   (-sum(clausetable_neg$p_neg * log(clausetable_neg$p_neg, 2)))
+}
+zuo_mi_div_neg_ent_der_numDeriv = jacobian(function(x) mi_div_neg_ent_for_numDeriv(x, clausetable_zuo_nv), zuo_theta)
+
+gu_mi_div_neg_ent_der = (gu_mi_der * gu_neg_ent - gu_neg_ent_der * gu_mi) / gu_neg_ent^2
+gu_mi_div_neg_ent_der_numDeriv = jacobian(function(x) mi_div_neg_ent_for_numDeriv(x, clausetable_gu_nv), gu_theta)
+```
+
+Calculating the variances of the parameter estimates:
+
+```{r}
+pm = function(a, b) rbind(a-b, a+b)
+
+zuo_varp = solve(matrix(rep(n_zuo / (1 - sum(zuo_theta)), length(zuo_theta)^2), nrow = length(zuo_theta)) + diag(n_zuo / (zuo_theta)))
+zuo_mi_div_neg_ent_var = t(zuo_mi_div_neg_ent_der) %*% zuo_varp %*% zuo_mi_div_neg_ent_der
+
+gu_varp = solve(matrix(rep(n_gu / (1 - sum(gu_theta)), length(gu_theta)^2), nrow = length(gu_theta)) + diag(n_gu / (gu_theta)))
+gu_mi_div_neg_ent_var = t(gu_mi_div_neg_ent_der) %*% gu_varp %*% gu_mi_div_neg_ent_der
+
+diff_mi_div_neg_ent = zuo_mi_div_neg_ent - gu_mi_div_neg_ent
+diff_var = zuo_mi_div_neg_ent_var + gu_mi_div_neg_ent_var
+diff_se = sqrt(diff_var)
+diff_mi_div_neg_ent_ci = pm(diff_mi_div_neg_ent, qnorm(.975) * diff_se)
+```
+
+
+
+## Pointwise quantities:
+
+Calculating the quantities:
+
+```{r}
+zuo_pointwise_verb_given_neg_ent = clausetable_zuo_nv %>% ungroup() %>% mutate(pointwise_verb_given_neg_ent_comp = -(clausetable_zuo_nv$p_joint / clausetable_zuo_nv$p_neg) * log(clausetable_zuo_nv$p_joint / (clausetable_zuo_nv$p_neg), 2)) %>% group_by(negator) %>% summarise(pointwise_verb_given_neg_ent = sum(pointwise_verb_given_neg_ent_comp)) #comp = component
+
+gu_pointwise_verb_given_neg_ent = clausetable_gu_nv %>% ungroup() %>% mutate(pointwise_verb_given_neg_ent_comp = -(clausetable_gu_nv$p_joint / clausetable_gu_nv$p_neg) * log(clausetable_gu_nv$p_joint / (clausetable_gu_nv$p_neg), 2)) %>% group_by(negator) %>% summarise(pointwise_verb_given_neg_ent = sum(pointwise_verb_given_neg_ent_comp)) #comp = component
+```
+
+Derivatives for the Zuozhuan:
+* Quantity 1 (q1): (p(n) - p(v, n)) / p(n)^2
+* Quantity 2 (q2): -p(v, n) / (p(n))^2
+* Quantity 3 (q3): -(1 + ln(p(v, n)) - ln(p(n))) / ln2
+
+```{r}
+clausetable_zuo_nv = clausetable_zuo_nv %>%
+  mutate(q1 = (p_neg - p_joint) / (p_neg)^2, q2 = -p_joint / (p_neg)^2, q3 =  -(1 + log(p_joint) - log(p_neg)) / log(2))
+
+get_verb_given_bu_ent_der = function(k, clausetable_nv){
+  currRow = clausetable_nv[k,]
+  if(currRow$negator == "不"){
+    der_comps = clausetable_nv$q3 * case_when(
+              (clausetable_nv$negator == "不" & clausetable_nv$verb == currRow$verb) ~ clausetable_nv$q1,
+              (clausetable_nv$negator == "不" & clausetable_nv$verb != currRow$verb) ~ clausetable_nv$q2,
+              (clausetable_nv$negator == "弗" & clausetable_nv$verb != currRow$verb) ~ 0,
+              (clausetable_nv$negator == "弗" & clausetable_nv$verb == currRow$verb) ~ 0)
+  } else {
+    der_comps = 0
+  }
+  sum(der_comps)
+}
+
+
+get_verb_given_fu_ent_der = function(k, clausetable_nv){
+  currRow = clausetable_nv[k,] # curr row = what you're differentiating with respect to!
+  if(currRow$negator == "弗"){
+    der_comps = clausetable_nv$q3 * case_when(
+              (clausetable_nv$negator == "不" & clausetable_nv$verb == currRow$verb) ~ 0, #never occurs in the summation
+              (clausetable_nv$negator == "不" & clausetable_nv$verb != currRow$verb) ~ 0, #never occurs in the summation
+              (clausetable_nv$negator == "弗" & clausetable_nv$verb != currRow$verb) ~ 0, #both num, dem don't depend on curr prob
+              (clausetable_nv$negator == "弗" & clausetable_nv$verb == currRow$verb) ~ 1 / clausetable_nv$p_neg) #num depends
+    der_comps[length(der_comps)] =  clausetable_nv$q3[length(der_comps)] * (-1 / currRow$p_neg)
+  } else {
+    der_comps = clausetable_nv$q3 * case_when(
+              (clausetable_nv$negator == "不" & clausetable_nv$verb == currRow$verb) ~ 0, #never occurs in the summation
+              (clausetable_nv$negator == "不" & clausetable_nv$verb != currRow$verb) ~ 0, #never occurs in the summation
+              (clausetable_nv$negator == "弗" & clausetable_nv$verb != currRow$verb) ~ -clausetable_nv$q2, #dem depends
+              (clausetable_nv$negator == "弗" & clausetable_nv$verb == currRow$verb) ~ -clausetable_nv$q2) #dem depends
+    der_comps[length(der_comps)] = -clausetable_nv$q3[length(der_comps)] * clausetable_nv$q1[length(der_comps)]
+  }
+  sum(der_comps)
+}
+
+zuo_verb_given_bu_ent_der = sapply(1:(nrow(clausetable_zuo_nv)-1), get_verb_given_bu_ent_der, clausetable_zuo_nv)
+zuo_verb_given_fu_ent_der = sapply(1:(nrow(clausetable_zuo_nv)-1), get_verb_given_fu_ent_der, clausetable_zuo_nv)
+zuo_verb_given_neg_ent_der = rbind(zuo_verb_given_bu_ent_der, zuo_verb_given_fu_ent_der)
+
+pointwise_verb_given_neg_ent_for_numDeriv = function(theta, clausetable_nv){
+  clausetable_nv = clausetable_nv %>% ungroup() %>% select(-c("p_neg","p_verb","p_joint")) %>% mutate(p_joint = c(theta, 1 - sum(theta)))
+  clausetable_neg = clausetable_nv %>% group_by(negator) %>% summarise(p_neg = sum(p_joint)) %>% ungroup()
+  clausetable_verb = clausetable_nv %>% group_by(verb) %>% summarise(p_verb = sum(p_joint)) %>% ungroup()
+  clausetable_nv = clausetable_nv %>%
+  inner_join(clausetable_neg, by = "negator", suffix = c("_joint", "_neg")) %>%
+  inner_join(clausetable_verb, by = "verb")
+
+  clausetable_nv %>% ungroup() %>% mutate(pointwise_verb_given_neg_ent_comp = -(clausetable_nv$p_joint / clausetable_nv$p_neg) * log(clausetable_nv$p_joint / (clausetable_nv$p_neg), 2)) %>% group_by(negator) %>% summarise(pointwise_verb_given_neg_ent = sum(pointwise_verb_given_neg_ent_comp)) %>% pull(pointwise_verb_given_neg_ent)
+}
+zuo_verb_given_neg_ent_der_numDeriv = jacobian(function(x) pointwise_verb_given_neg_ent_for_numDeriv(x, clausetable_zuo_nv), zuo_theta)
+
+
+#pointwise_verb_given_neg_ent_fu_comps_for_numDeriv = function(theta, clausetable_nv){
+#  clausetable_nv = clausetable_nv %>% ungroup() %>% select(-c("p_neg","p_verb","p_joint")) %>% mutate(p_joint = c(theta, 1 - sum(theta)))
+#  clausetable_neg = clausetable_nv %>% group_by(negator) %>% summarise(p_neg = sum(p_joint)) %>% ungroup()
+#  clausetable_verb = clausetable_nv %>% group_by(verb) %>% summarise(p_verb = sum(p_joint)) %>% ungroup()
+#  clausetable_nv = clausetable_nv %>%
+#  inner_join(clausetable_neg, by = "negator", suffix = c("_joint", "_neg")) %>%
+#  inner_join(clausetable_verb, by = "verb")
+  
+#  clausetable_nv %>% ungroup() %>% mutate(pointwise_verb_given_neg_ent_comp = -(clausetable_nv$p_joint / clausetable_nv$p_neg) * log(clausetable_nv$p_joint / (clausetable_nv$p_neg), 2)) %>% filter(negator == "弗") %>% pull(pointwise_verb_given_neg_ent_comp)
+#}
+#zuo_verb_given_neg_ent_der_comps_numDeriv = jacobian(function(x) pointwise_verb_given_neg_ent_fu_comps_for_numDeriv(x, clausetable_zuo_nv), zuo_theta)
+
+#, method.args=list(eps=1e-4, d=0.00001, zero.tol=sqrt(.Machine$double.eps/7e-7), r=6, v=2, show.details=FALSE)
+
+```
+
+Likewise for Guliang:
+
+```{r}
+clausetable_gu_nv = clausetable_gu_nv %>%
+  mutate(q1 = (p_neg - p_joint) / (p_neg)^2, q2 = -p_joint / (p_neg)^2, q3 =  -(1 + log(p_joint) - log(p_neg)) / log(2))
+
+gu_verb_given_bu_ent_der = sapply(1:(nrow(clausetable_gu_nv)-1), get_verb_given_bu_ent_der, clausetable_gu_nv)
+gu_verb_given_fu_ent_der = sapply(1:(nrow(clausetable_gu_nv)-1), get_verb_given_fu_ent_der, clausetable_gu_nv)
+gu_verb_given_neg_ent_der = rbind(gu_verb_given_bu_ent_der, gu_verb_given_fu_ent_der)
+
+gu_verb_given_neg_ent_der_numDeriv = jacobian(function(x) pointwise_verb_given_neg_ent_for_numDeriv(x, clausetable_gu_nv), gu_theta)
+
+```
+
+Covariance matrices and confidence intervals:
+
+```{r}
+
+C = t(c(1, -1))
+zuo_verb_given_neg_ent_diff = C %*% zuo_pointwise_verb_given_neg_ent$pointwise_verb_given_neg_ent 
+zuo_verb_given_neg_ent_var = zuo_verb_given_neg_ent_der %*% zuo_varp %*% t(zuo_verb_given_neg_ent_der)
+zuo_verb_given_neg_ent_diff_var = C %*% zuo_verb_given_neg_ent_var %*% t(C)
+zuo_verb_given_neg_ent_diff_se = sqrt(zuo_verb_given_neg_ent_diff_var)
+
+gu_verb_given_neg_ent_diff = C %*% gu_pointwise_verb_given_neg_ent$pointwise_verb_given_neg_ent 
+gu_verb_given_neg_ent_var = gu_verb_given_neg_ent_der %*% gu_varp %*% t(gu_verb_given_neg_ent_der)
+gu_verb_given_neg_ent_diff_var = C %*% gu_verb_given_neg_ent_var %*% t(C)
+gu_verb_given_neg_ent_diff_se = sqrt(gu_verb_given_neg_ent_diff_var)
+verb_given_neg_ent_diff_ci = pm(c(zuo_verb_given_neg_ent_diff, gu_verb_given_neg_ent_diff), qnorm(1 - .05 / 4) * c(zuo_verb_given_neg_ent_diff_se, gu_verb_given_neg_ent_diff_se))
+
+diff_verb_given_neg_ent_diff = zuo_verb_given_neg_ent_diff - gu_verb_given_neg_ent_diff
+diff_verb_given_neg_ent_var = zuo_verb_given_neg_ent_diff_var + gu_verb_given_neg_ent_diff_var
+diff_verb_given_neg_ent_se = sqrt(diff_verb_given_neg_ent_var)
+diff_verb_given_neg_ent_ci = pm(diff_verb_given_neg_ent_diff, qnorm(.025)* diff_verb_given_neg_ent_se)
+```
+
+
+##Simulations - MI
+
+Create the simulated data frames:
+
+```{r}
+resampleDF = function(df) df[ceiling(runif(nrow(df))*nrow(df)),]
+clausetable_zuo_resamples = lapply(1:1000, function(x) resampleDF(clausetable_zuo))
+clausetable_gu_resamples = lapply(1:1000, function(x) resampleDF(clausetable_gu))
+
+```
+
+Gigantic function for creating all desired quantities:
+
+```{r}
+
+calculateDesiredQuants = function(clausetable_zuo, clausetable_gu){
+  n_gu = nrow(clausetable_gu)
+  n_zuo = nrow(clausetable_zuo)
+  
+  clausetable_gu_neg = clausetable_gu %>% group_by(negator) %>% summarise(p = n()/n_gu)
+  clausetable_gu_verb = clausetable_gu %>% group_by(verb) %>% summarise(p = n()/n_gu)
+  clausetable_gu_nv = clausetable_gu %>% group_by(negator, verb) %>% summarise(p = n()/n_gu) %>%
+    inner_join(clausetable_gu_neg, by = "negator", suffix = c("_joint", "_neg")) %>%
+    inner_join(clausetable_gu_verb, by = "verb") %>% rename(p_verb = p)
+  
+  clausetable_zuo_neg = clausetable_zuo %>% group_by(negator) %>% summarise(p = n()/n_zuo)
+  clausetable_zuo_verb = clausetable_zuo %>% group_by(verb) %>% summarise(p = n()/n_zuo)
+  clausetable_zuo_nv = clausetable_zuo %>% group_by(negator, verb) %>% summarise(p = n()/n_zuo) %>%
+    inner_join(clausetable_zuo_neg, by = "negator", suffix = c("_joint", "_neg")) %>%
+    inner_join(clausetable_zuo_verb, by = "verb") %>% rename(p_verb = p)
+  
+  zuo_mi = sum(clausetable_zuo_nv$p_joint * log(clausetable_zuo_nv$p_joint / (clausetable_zuo_nv$p_neg * clausetable_zuo_nv$p_verb), 2))
+  zuo_neg_ent = -sum(clausetable_zuo_neg$p * log(clausetable_zuo_neg$p, 2))
+  zuo_joint_ent = -sum(clausetable_zuo_nv$p_joint * log(clausetable_zuo_nv$p_joint, 2))
+  
+  gu_mi = sum(clausetable_gu_nv$p_joint * log(clausetable_gu_nv$p_joint / (clausetable_gu_nv$p_neg * clausetable_gu_nv$p_verb), 2))
+  gu_neg_ent = -sum(clausetable_gu_neg$p * log(clausetable_gu_neg$p, 2))
+  gu_joint_ent = -sum(clausetable_gu_nv$p_joint * log(clausetable_gu_nv$p_joint, 2))
+  
+  zuo_mi_div_neg_ent = zuo_mi / zuo_neg_ent
+  gu_mi_div_neg_ent = gu_mi / gu_neg_ent
+  
+  zuo_row_I = clausetable_zuo_nv[nrow(clausetable_zuo_nv),]
+  zuo_log_rowI = log(zuo_row_I$p_neg)  + log(zuo_row_I$p_verb) - log(zuo_row_I$p_joint)#Log terms related to row I
+  clausetable_zuo_nv_with_log_self = clausetable_zuo_nv[-nrow(clausetable_zuo_nv),] %>% ungroup() %>% mutate(log_self = log(p_joint) - log(p_neg) -log(p_verb)) %>%
+    mutate(mi_der = (log_self + zuo_log_rowI) / log(2))
+  zuo_mi_der = clausetable_zuo_nv_with_log_self$mi_der
+  
+  zuo_theta = clausetable_zuo_nv[-nrow(clausetable_zuo_nv),]$p_joint
+
+  gu_row_I = clausetable_gu_nv[nrow(clausetable_gu_nv),]
+  gu_log_rowI = log(gu_row_I$p_neg)  + log(gu_row_I$p_verb) - log(gu_row_I$p_joint)#Log terms related to row I
+  clausetable_gu_nv_with_log_self = clausetable_gu_nv[-nrow(clausetable_gu_nv),] %>% ungroup() %>% mutate(log_self = log(p_joint) - log(p_neg) -log(p_verb)) %>%
+    mutate(mi_der = (log_self + gu_log_rowI) / log(2))
+  gu_mi_der = clausetable_gu_nv_with_log_self$mi_der
+  
+  gu_theta = clausetable_gu_nv[-nrow(clausetable_gu_nv),]$p_joint
+  
+  zuo_neg_ent_der = ((- log(clausetable_zuo_nv$p_neg) + log(zuo_row_I$p_neg)) / log(2))
+  zuo_neg_ent_der = zuo_neg_ent_der[-length(zuo_neg_ent_der)]
+  
+  gu_neg_ent_der = ((- log(clausetable_gu_nv$p_neg) + log(gu_row_I$p_neg)) / log(2))
+  gu_neg_ent_der = gu_neg_ent_der[-length(gu_neg_ent_der)]
+
+  zuo_mi_div_neg_ent_der = (zuo_mi_der * zuo_neg_ent - zuo_neg_ent_der * zuo_mi) / zuo_neg_ent^2
+  gu_mi_div_neg_ent_der = (gu_mi_der * gu_neg_ent - gu_neg_ent_der * gu_mi) / gu_neg_ent^2
+
+  zuo_varp = solve(matrix(rep(n_zuo / (1 - sum(zuo_theta)), length(zuo_theta)^2), nrow = length(zuo_theta)) + diag(n_zuo / ( zuo_theta)))
+  zuo_mi_div_neg_ent_var = t(zuo_mi_div_neg_ent_der) %*% zuo_varp %*% zuo_mi_div_neg_ent_der
+  
+  gu_varp = solve(matrix(rep(n_gu / (1 - sum(gu_theta)), length(gu_theta)^2), nrow = length(gu_theta)) + diag(n_gu / (gu_theta)))
+  gu_mi_div_neg_ent_var = t(gu_mi_div_neg_ent_der) %*% gu_varp %*% gu_mi_div_neg_ent_der
+  
+  diff_mi_div_neg_ent = zuo_mi_div_neg_ent - gu_mi_div_neg_ent
+  print(paste0(zuo_mi_div_neg_ent, " and ", gu_mi_div_neg_ent))
+  diff_var = zuo_mi_div_neg_ent_var + gu_mi_div_neg_ent_var
+  diff_se = sqrt(diff_var)
+  diff_mi_div_neg_ent_ci = pm(diff_mi_div_neg_ent, qnorm(.975) * diff_se)
+  
+  zuo_pointwise_verb_given_neg_ent = clausetable_zuo_nv %>% ungroup() %>% mutate(pointwise_verb_given_neg_ent_comp = -(clausetable_zuo_nv$p_joint / clausetable_zuo_nv$p_neg) * log(clausetable_zuo_nv$p_joint / (clausetable_zuo_nv$p_neg), 2)) %>% group_by(negator) %>% summarise(pointwise_verb_given_neg_ent = sum(pointwise_verb_given_neg_ent_comp)) #comp = component
+  
+  gu_pointwise_verb_given_neg_ent = clausetable_gu_nv %>% ungroup() %>% mutate(pointwise_verb_given_neg_ent_comp = -(clausetable_gu_nv$p_joint / clausetable_gu_nv$p_neg) * log(clausetable_gu_nv$p_joint / (clausetable_gu_nv$p_neg), 2)) %>% group_by(negator) %>% summarise(pointwise_verb_given_neg_ent = sum(pointwise_verb_given_neg_ent_comp)) #comp = component
+  
+  clausetable_zuo_nv = clausetable_zuo_nv %>%
+    mutate(q1 = (p_neg - p_joint) / (p_neg)^2, q2 = -p_joint / (p_neg)^2, q3 =  -(1 + log(p_joint) - log(p_neg)) / log(2))
+  
+  
+  zuo_verb_given_bu_ent_der = sapply(1:(nrow(clausetable_zuo_nv)-1), get_verb_given_bu_ent_der, clausetable_zuo_nv)
+  zuo_verb_given_fu_ent_der = sapply(1:(nrow(clausetable_zuo_nv)-1), get_verb_given_fu_ent_der, clausetable_zuo_nv)
+  zuo_verb_given_neg_ent_der = rbind(zuo_verb_given_bu_ent_der, zuo_verb_given_fu_ent_der)
+  
+  clausetable_gu_nv = clausetable_gu_nv %>%
+    mutate(q1 = (p_neg - p_joint) / (p_neg)^2, q2 = -p_joint / (p_neg)^2, q3 =  -(1 + log(p_joint) - log(p_neg)) / log(2))
+  
+  gu_verb_given_bu_ent_der = sapply(1:(nrow(clausetable_gu_nv)-1), get_verb_given_bu_ent_der, clausetable_gu_nv)
+  gu_verb_given_fu_ent_der = sapply(1:(nrow(clausetable_gu_nv)-1), get_verb_given_fu_ent_der, clausetable_gu_nv)
+  gu_verb_given_neg_ent_der = rbind(gu_verb_given_bu_ent_der, gu_verb_given_fu_ent_der)
+  
+  C = t(c(1, -1))
+  zuo_verb_given_neg_ent_diff = C %*% zuo_pointwise_verb_given_neg_ent$pointwise_verb_given_neg_ent 
+  zuo_verb_given_neg_ent_var = zuo_verb_given_neg_ent_der %*% zuo_varp %*% t(zuo_verb_given_neg_ent_der)
+  zuo_verb_given_neg_ent_diff_var = C %*% zuo_verb_given_neg_ent_var %*% t(C)
+  zuo_verb_given_neg_ent_diff_se = sqrt(zuo_verb_given_neg_ent_diff_var)
+  
+  gu_verb_given_neg_ent_diff = C %*% gu_pointwise_verb_given_neg_ent$pointwise_verb_given_neg_ent 
+  gu_verb_given_neg_ent_var = gu_verb_given_neg_ent_der %*% gu_varp %*% t(gu_verb_given_neg_ent_der)
+  gu_verb_given_neg_ent_diff_var = C %*% gu_verb_given_neg_ent_var %*% t(C)
+  gu_verb_given_neg_ent_diff_se = sqrt(gu_verb_given_neg_ent_diff_var)
+  
+  verb_given_neg_ent_diff_ci = pm(c(zuo_verb_given_neg_ent_diff, gu_verb_given_neg_ent_diff), qnorm(1 - .05 / 4) * c(zuo_verb_given_neg_ent_diff_se, gu_verb_given_neg_ent_diff_se))
+  
+  diff_verb_given_neg_ent_diff = zuo_verb_given_neg_ent_diff - gu_verb_given_neg_ent_diff
+  diff_verb_given_neg_ent_var = zuo_verb_given_neg_ent_diff_var + gu_verb_given_neg_ent_diff_var
+  diff_verb_given_neg_ent_se = sqrt(diff_verb_given_neg_ent_var)
+  diff_verb_given_neg_ent_ci = pm(diff_verb_given_neg_ent_diff, qnorm(.975) * diff_verb_given_neg_ent_se)
+  
+  list(diff_mi_div_neg_ent, diff_var, diff_mi_div_neg_ent_ci, zuo_verb_given_neg_ent_diff, gu_verb_given_neg_ent_diff, zuo_verb_given_neg_ent_var, gu_verb_given_neg_ent_var, verb_given_neg_ent_diff_ci, diff_verb_given_neg_ent_diff, diff_verb_given_neg_ent_var, diff_verb_given_neg_ent_ci)
+}
+```
+
+Calculating those quantities:
+
+```{r}
+library(parallel)
+cl = makeCluster(getOption("cl.cores", detectCores()), outfile="log.txt")
+clusterExport(cl, c("zuo_mi_div_neg_ent_der", "pm", "get_verb_given_bu_ent_der", "get_verb_given_fu_ent_der", "pointwise_verb_given_neg_ent_for_numDeriv", "calculateDesiredQuants"))
+clusterEvalQ(cl, library(dplyr))
+clausetable_resamples = lapply(1:1000, function(x) list(clausetable_zuo_resamples[[x]], clausetable_gu_resamples[[x]]))
+sim_results = parLapply(cl, clausetable_resamples, function(x) calculateDesiredQuants(x[[1]], x[[2]]))
+
+```
+
+Grabbing the results:
+
+```{r}
+mi_sim_diffs = sapply(sim_results, function(x) x[[1]])
+mi_mean_sim_diffs = mean(mi_sim_diffs)
+printVector(mi_mean_sim_diffs)
+sim_vardiffs = var((mi_sim_diffs))
+sim_vardiffs
+
+mi_sim_cis_high = sapply(sim_results, function(x) x[[3]][2,])
+mi_sim_cis_low = sapply(sim_results, function(x) x[[3]][1,])
+mi_coverages = sapply(1:length(mi_sim_cis_high), function(x) (mi_sim_cis_low[x] < diff_mi_div_neg_ent & diff_mi_div_neg_ent < mi_sim_cis_high[x]))
+mi_coverages_percs = mean(mi_coverages)
+```
+
+
+
+```{r}
+cond_ents_sim_diffs_zuo = sapply(sim_results, function(x) c(x[[4]], x[[5]]))
+cond_ents_mean_sim_diffs_zuo = rowMeans(cond_ents_sim_diffs_zuo)
+printVector(cond_ents_mean_sim_diffs_zuo)
+sim_vardiffs_zuo = var(t(cond_ents_sim_diffs_zuo))
+sim_vardiffs_zuo
+
+
+cond_ents_sim_diffs_gu = sapply(sim_results, function(x) c(x[[4]], x[[5]]))
+cond_ents_mean_sim_diffs_gu = rowMeans(cond_ents_sim_diffs_gu)
+printVector(cond_ents_mean_sim_diffs_gu)
+sim_vardiffs_gu = var(t(cond_ents_sim_diffs_gu))
+sim_vardiffs_gu
+
+cond_ents_sim_cis_high = sapply(sim_results, function(x) x[[8]][2,])
+cond_ents_sim_cis_low = sapply(sim_results, function(x) x[[8]][1,])
+cond_ents_coverages = sapply(1:ncol(cond_ents_sim_cis_high), function(x) (cond_ents_sim_cis_low[,x] < c(zuo_verb_given_neg_ent_diff, gu_verb_given_neg_ent_diff) & c(zuo_verb_given_neg_ent_diff, gu_verb_given_neg_ent_diff) < cond_ents_sim_cis_high[,x]))
+cond_ents_coverages_percs = rowMeans(cond_ents_coverages)
+```
+
+
+
+```{r}
+cond_ent_diff_sim_diffs = sapply(sim_results, function(x) x[[9]])
+cond_ent_diff_mean_sim_diffs = mean(cond_ent_diff_sim_diffs)
+printVector(cond_ent_diff_mean_sim_diffs)
+sim_vardiffs = var((cond_ent_diff_sim_diffs))
+sim_vardiffs
+
+cond_ent_diff_sim_cis_high = sapply(sim_results, function(x) x[[11]][2,])
+cond_ent_diff_sim_cis_low = sapply(sim_results, function(x) x[[11]][1,])
+cond_ent_diff_coverages = sapply(1:length(cond_ent_diff_sim_cis_high), function(x) (cond_ent_diff_sim_cis_low[x] < diff_verb_given_neg_ent_diff & diff_verb_given_neg_ent_diff < cond_ent_diff_sim_cis_high[x]))
+cond_ent_diff_coverages_percs = mean(cond_ent_diff_coverages)
+```
+
+## Clustered simulation
+
+```{r}
+clausetable_gu = clausetable_gu %>% mutate(sectionpara = paste0(section, "_", para))
+clausetable_zuo = clausetable_zuo %>% mutate(sectionpara = paste0(section, "_", para))
+
+getClusterResample = function(clausetable){
+   paras = unique(clausetable$sectionpara)
+   new_paras = paras[ceiling(runif(length(paras))*length(paras))]
+   lapply(new_paras, function(x) clausetable %>% filter(sectionpara == x)) %>% bind_rows()
+}
+zuo_cluster_resamples = lapply(1:1000, function(x) getClusterResample(clausetable_zuo))
+gu_cluster_resamples = lapply(1:1000, function(x) getClusterResample(clausetable_gu))
+```
+
+Calculating those quantities:
+
+```{r}
+clausetable_resamples_cluster = lapply(1:1000, function(x) list(zuo_cluster_resamples[[x]], gu_cluster_resamples[[x]]))
+sim_results_cluster = parLapply(cl, clausetable_resamples_cluster, function(x) calculateDesiredQuants(x[[1]], x[[2]]))
+```
+
+Grabbing the results:
+
+```{r}
+mi_sim_diffs_cluster = sapply(sim_results_cluster, function(x) x[[1]])
+mi_mean_sim_diffs_cluster = mean(mi_sim_diffs_cluster)
+printVector(mi_mean_sim_diffs_cluster)
+sim_vardiffs_cluster = var((mi_sim_diffs_cluster))
+sim_vardiffs_cluster
+
+mi_sim_cis_high_cluster = sapply(sim_results, function(x) x[[3]][2,])
+mi_sim_cis_low_cluster = sapply(sim_results, function(x) x[[3]][1,])
+mi_coverages_cluster = sapply(1:length(mi_sim_cis_high_cluster), function(x) (mi_sim_cis_low_cluster[x] < diff_mi_div_neg_ent & diff_mi_div_neg_ent < mi_sim_cis_high_cluster[x]))
+mi_coverages_percs_cluster = mean(mi_coverages_cluster)
+mi_coverages_percs_cluster
+```
+
+
+
+```{r}
+cond_ents_sim_diffs_cluster = sapply(sim_results_cluster, function(x) c(x[[4]], x[[5]]))
+cond_ents_mean_sim_diffs_cluster = rowMeans(cond_ents_sim_diffs_cluster)
+printVector(cond_ents_mean_sim_diffs_cluster)
+sim_vardiffs_cluster = var(t(cond_ents_sim_diffs_cluster))
+sim_vardiffs_cluster
+
+cond_ents_sim_cis_high_cluster = sapply(sim_results_cluster, function(x) x[[8]][2,])
+cond_ents_sim_cis_low_cluster = sapply(sim_results_cluster, function(x) x[[8]][1,])
+cond_ents_coverages_cluster = sapply(1:ncol(cond_ents_sim_cis_high_cluster), function(x) (cond_ents_sim_cis_low_cluster[,x] < c(zuo_verb_given_neg_ent_diff, gu_verb_given_neg_ent_diff) & c(zuo_verb_given_neg_ent_diff, gu_verb_given_neg_ent_diff) < cond_ents_sim_cis_high_cluster[,x]))
+cond_ents_coverages_percs_cluster_overall = mean(apply(cond_ents_coverages_cluster, 2, all))
+cond_ents_coverages_percs_cluster = rowMeans(cond_ents_coverages_cluster)
+cond_ents_coverages_percs_cluster
+```
+
+
+
+```{r}
+cond_ent_diff_sim_diffs_cluster = sapply(sim_results_cluster, function(x) x[[9]])
+cond_ent_diff_mean_sim_diffs_cluster = mean(cond_ent_diff_sim_diffs_cluster)
+printVector(cond_ent_diff_mean_sim_diffs_cluster)
+sim_vardiff_diffs_cluster = var((cond_ent_diff_sim_diffs_cluster))
+sim_vardiff_diffs_cluster
+
+cond_ent_diff_sim_cis_high_cluster = sapply(sim_results_cluster, function(x) x[[11]][2,])
+cond_ent_diff_sim_cis_low_cluster = sapply(sim_results_cluster, function(x) x[[11]][1,])
+cond_ent_diff_coverages_cluster = sapply(1:length(cond_ent_diff_sim_cis_high_cluster), function(x) (cond_ent_diff_sim_cis_low_cluster[x] < diff_verb_given_neg_ent_diff & diff_verb_given_neg_ent_diff < cond_ent_diff_sim_cis_high_cluster[x]))
+cond_ent_diff_coverages_percs_cluster = mean(cond_ent_diff_coverages_cluster)
+cond_ent_diff_coverages_percs_cluster
+```

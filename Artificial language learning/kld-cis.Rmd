@@ -164,7 +164,12 @@ dklddp = rbind(diag(c(dklddpi_model1_lang1_cor, dklddpi_model1_lang1_lab, dklddp
                diag(c(dklddpi_model3_lang1_cor, dklddpi_model3_lang1_lab, dklddpi_model3_lang2_cor, dklddpi_model3_lang2_lab)),
                diag(c(dklddpi_model4_lang1_cor, dklddpi_model4_lang1_lab, dklddpi_model4_lang2_cor, dklddpi_model4_lang2_lab)))
 
-
+#Numerical version
+library(numDeriv)
+computeKLDsForNumDeriv = function(p_lr){
+  c(computeKLD(p_model1, p_lr), computeKLD(p_model2, p_lr), computeKLD(p_model3, p_lr), computeKLD(p_model4, p_lr))
+}
+dklddp_num = jacobian(computeKLDsForNumDeriv, p_lr)
 ```
 
 Now derivatives of the p's with respect to the beta's:
@@ -186,6 +191,17 @@ dp2dbeta = c(computePDer( 1,  1, -1), computePDer( 1,  1,  1), computePDer( 1,  
 dp3dbeta = c(computePDer(-1, -1, -1), computePDer(-1, -1, -1), computePDer(-1, -1, -1))
 dp4dbeta = c(computePDer( 1, -1, -1), computePDer( 1, -1,  1), computePDer( 1, -1, -1))
 dpdbeta = rbind(dp1dbeta, dp2dbeta, dp3dbeta, dp4dbeta)
+
+#Numerical version
+findPLRForNumDeriv = function(beta){
+  p_lr_lang1_cor = 1 / (exp(-beta[1] - beta[2] + beta[3]) + 1)
+  p_lr_lang1_lab = 1 / (exp(-beta[1] + beta[2] + beta[3]) + 1)
+  p_lr_lang2_cor = 1 / (exp(-beta[1] - beta[2] - beta[3]) + 1)
+  p_lr_lang2_lab = 1 / (exp(-beta[1] + beta[2] - beta[3]) + 1)
+  c(p_lr_lang1_cor, p_lr_lang1_lab, p_lr_lang2_cor, p_lr_lang2_lab)
+}
+dpdbeta_num = jacobian(findPLRForNumDeriv, beta)
+
 ```
 
 Now let's put everything together:
@@ -221,6 +237,7 @@ printCIs = function(low, up){
 }
 printVector = function(vec) paste("(",paste(signif(vec, 4), collapse=", "),")", sep="")
 printVector(diffs)
+printVector(p_lr)
 printLatexTable(as.matrix(vardiff))
 printCIs(CIs[1,],CIs[2,])
 ```
@@ -231,21 +248,316 @@ grouped = (exp.generalize.test %>% filter(!is.na(Alternation2)) %>% group_by(use
 rarefreq = grouped %>% dcast(userCode + Place + Exp ~ Alternation2, sum, value.var = "no", margins = c("userCode", "Alternation2"))
 colnames(rarefreq) = c("userCode","Place", "Exp", "rareFeat","freqFeat","all")
 rarefreq = rarefreq %>% mutate(perc = freqFeat / (freqFeat + rareFeat))
-mean(rarefreq %>% filter(Place == "Coronal", Exp == "Exp1") %>% select(perc))
-mean(rarefreq %>% filter(Place == "Labial", Exp == "Exp1") %>% select(perc))
-mean(rarefreq %>% filter(Place == "Coronal", Exp == "Exp2") %>% select(perc))
-mean(rarefreq %>% filter(Place == "Labial", Exp == "Exp2") %>% select(perc))
+summary(as.matrix(rarefreq %>% filter(Place == "Coronal", Exp == "Exp1") %>% select(perc)))
+summary(as.matrix(rarefreq %>% filter(Place == "Labial", Exp == "Exp1") %>% select(perc)))
+summary(as.matrix(rarefreq %>% filter(Place == "Coronal", Exp == "Exp2") %>% select(perc)))
+summary(as.matrix(rarefreq %>% filter(Place == "Labial", Exp == "Exp2") %>% select(perc)))
+rarefreq %>% filter(userCode != "(all)") %>% ggplot(aes(x = perc)) + geom_density() + facet_wrap(Place ~ Exp)
 
 ungrouped = (exp.generalize.test %>% filter(!is.na(Alternation2)) %>% group_by(Place, Exp, Alternation2) %>% summarise(no = n()))
-rarefreq = ungrouped %>% dcast(Place + Exp ~ Alternation2, sum, value.var = "no")
-colnames(rarefreq) = c("Place", "Exp", "rareFeat","freqFeat","all")
-rarefreq = rarefreq %>% mutate(perc = freqFeat / (freqFeat + rareFeat))
-
+rarefreq_ug = ungrouped %>% dcast(Place + Exp ~ Alternation2, sum, value.var = "no")
+colnames(rarefreq_ug) = c("Place", "Exp", "rareFeat","freqFeat")
+rarefreq_ug = rarefreq_ug %>% mutate(perc = freqFeat / (freqFeat + rareFeat))
+printVector(rarefreq_ug$perc)
 ```
 
 ## Simulation studies
 
+Function for creating simulated values:
+
 ```{r}
 library(dplyr)
 exp.generalize.test %>% group_by(userCode) %>% summarise(no = n())
+sim_datasets = simulate(generalize.exp.lmer2, nsim = 1000)
+getCIsFromDataset = function(dataset){
+  exp.generalize.test_new = exp.generalize.test_new %>% filter(!is.na(Alternation2)) %>% mutate(Alternation2 = dataset)
+  generalize.exp.lmer2_new = glmer(Alternation2 ~ Place + Exp + (1 + Place|userCode) + (1|item), data=exp.generalize.test_new,
+      family=binomial(link="logit"), control = glmerControl(optimizer="bobyqa"))
+  beta = generalize.exp.lmer2_new@beta
+  p_lr_lang1_cor = 1 / (exp(-beta[1] - beta[2] + beta[3]) + 1)
+  p_lr_lang1_lab = 1 / (exp(-beta[1] + beta[2] + beta[3]) + 1)
+  p_lr_lang2_cor = 1 / (exp(-beta[1] - beta[2] - beta[3]) + 1)
+  p_lr_lang2_lab = 1 / (exp(-beta[1] + beta[2] - beta[3]) + 1)
+  p_lr = c(p_lr_lang1_cor, p_lr_lang1_lab, p_lr_lang2_cor, p_lr_lang2_lab)
+    
+    
+  kld_model1_lang1_cor = computeKLD(p_model1[1], p_lr[1])
+  kld_model1_lang1_lab = computeKLD(p_model1[2], p_lr[2])
+  kld_model1_lang2_cor = computeKLD(p_model1[3], p_lr[3])
+  kld_model1_lang2_lab = computeKLD(p_model1[4], p_lr[4])
+  kld_model1 = c(kld_model1_lang1_cor, kld_model1_lang1_lab, kld_model1_lang2_cor, kld_model1_lang2_lab)
+  kld_model1_mean = mean(kld_model1)
+  
+  kld_model2_lang1_cor = computeKLD(p_model2[1], p_lr[1])
+  kld_model2_lang1_lab = computeKLD(p_model2[2], p_lr[2])
+  kld_model2_lang2_cor = computeKLD(p_model2[3], p_lr[3])
+  kld_model2_lang2_lab = computeKLD(p_model2[4], p_lr[4])
+  kld_model2 = c(kld_model2_lang1_cor, kld_model2_lang1_lab, kld_model2_lang2_cor, kld_model2_lang2_lab)
+  kld_model2_mean = mean(kld_model2)
+  
+  kld_model3_lang1_cor = computeKLD(p_model3[1], p_lr[1])
+  kld_model3_lang1_lab = computeKLD(p_model3[2], p_lr[2])
+  kld_model3_lang2_cor = computeKLD(p_model3[3], p_lr[3])
+  kld_model3_lang2_lab = computeKLD(p_model3[4], p_lr[4])
+  kld_model3 = c(kld_model3_lang1_cor, kld_model3_lang1_lab, kld_model3_lang2_cor, kld_model3_lang2_lab)
+  kld_model3_mean = mean(kld_model3)
+  
+  kld_model4_lang1_cor = computeKLD(p_model4[1], p_lr[1])
+  kld_model4_lang1_lab = computeKLD(p_model4[2], p_lr[2])
+  kld_model4_lang2_cor = computeKLD(p_model4[3], p_lr[3])
+  kld_model4_lang2_lab = computeKLD(p_model4[4], p_lr[4])
+  kld_model4 = c(kld_model4_lang1_cor, kld_model4_lang1_lab, kld_model4_lang2_cor, kld_model4_lang2_lab)
+  kld_model4_mean = mean(kld_model4)
+  
+  klds = c(kld_model1, kld_model2, kld_model3, kld_model4)
+  
+  dklddpi_model1_lang1_cor = computeKLDDer(p_model1[1], p_lr[1])
+  dklddpi_model1_lang1_lab = computeKLDDer(p_model1[2], p_lr[2])
+  dklddpi_model1_lang2_cor = computeKLDDer(p_model1[3], p_lr[3])
+  dklddpi_model1_lang2_lab = computeKLDDer(p_model1[4], p_lr[4])
+  
+  dklddpi_model2_lang1_cor = computeKLDDer(p_model2[1], p_lr[1])
+  dklddpi_model2_lang1_lab = computeKLDDer(p_model2[2], p_lr[2])
+  dklddpi_model2_lang2_cor = computeKLDDer(p_model2[3], p_lr[3])
+  dklddpi_model2_lang2_lab = computeKLDDer(p_model2[4], p_lr[4])
+  
+  dklddpi_model3_lang1_cor = computeKLDDer(p_model3[1], p_lr[1])
+  dklddpi_model3_lang1_lab = computeKLDDer(p_model3[2], p_lr[2])
+  dklddpi_model3_lang2_cor = computeKLDDer(p_model3[3], p_lr[3])
+  dklddpi_model3_lang2_lab = computeKLDDer(p_model3[4], p_lr[4])
+  
+  dklddpi_model4_lang1_cor = computeKLDDer(p_model4[1], p_lr[1])
+  dklddpi_model4_lang1_lab = computeKLDDer(p_model4[2], p_lr[2])
+  dklddpi_model4_lang2_cor = computeKLDDer(p_model4[3], p_lr[3])
+  dklddpi_model4_lang2_lab = computeKLDDer(p_model4[4], p_lr[4])
+  
+  dklddp = rbind(diag(c(dklddpi_model1_lang1_cor, dklddpi_model1_lang1_lab, dklddpi_model1_lang2_cor, dklddpi_model1_lang2_lab)),
+                 diag(c(dklddpi_model2_lang1_cor, dklddpi_model2_lang1_lab, dklddpi_model2_lang2_cor, dklddpi_model2_lang2_lab)),
+                 diag(c(dklddpi_model3_lang1_cor, dklddpi_model3_lang1_lab, dklddpi_model3_lang2_cor, dklddpi_model3_lang2_lab)),
+                 diag(c(dklddpi_model4_lang1_cor, dklddpi_model4_lang1_lab, dklddpi_model4_lang2_cor, dklddpi_model4_lang2_lab)))
+  
+  p_lr_lang1_cor = 1 / (exp(-beta[1] - beta[2] + beta[3]) + 1)
+  p_lr_lang1_lab = 1 / (exp(-beta[1] + beta[2] + beta[3]) + 1)
+  p_lr_lang2_cor = 1 / (exp(-beta[1] - beta[2] - beta[3]) + 1)
+  p_lr_lang2_lab = 1 / (exp(-beta[1] + beta[2] - beta[3]) + 1)
+  
+  
+  dp1dbeta = c(computePDer(-1,  1, -1), computePDer(-1,  1, -1), computePDer(-1,  1,  1))
+  dp2dbeta = c(computePDer( 1,  1, -1), computePDer( 1,  1,  1), computePDer( 1,  1,  1))
+  dp3dbeta = c(computePDer(-1, -1, -1), computePDer(-1, -1, -1), computePDer(-1, -1, -1))
+  dp4dbeta = c(computePDer( 1, -1, -1), computePDer( 1, -1,  1), computePDer( 1, -1, -1))
+  dpdbeta = rbind(dp1dbeta, dp2dbeta, dp3dbeta, dp4dbeta)
+  
+  varbetahat = vcov(generalize.exp.lmer2_new)
+  dklddbeta = dklddp %*% dpdbeta
+  varkld = dklddbeta %*% varbetahat %*% t(dklddbeta)
+  C = matrix(c(rep(-1/4, 4), rep(1/4, 4),    rep(0, 4),      rep(0, 4),
+               rep(-1/4, 4), rep(0, 4),      rep(1/4, 4),    rep(0, 4),
+               rep(0, 4),    rep(-1/4, 4),   rep(1/4, 4),    rep(0, 4),
+               rep(0, 4),    rep(-1/4, 4),   rep(0, 4),      rep(1/4, 4),
+               rep(0, 4),    rep(0, 4),      rep(-1/4, 4),   rep(1/4, 4)
+        ), nrow = 5, byrow = T)
+  diffs = C %*% klds
+  vardiff = as.matrix(C %*% varkld %*% t(C))
+  ses = sqrt(diag(vardiff))
+  CIs = pm(t(diffs), qnorm(1 - .05 / 10) * ses)
+  colnames(CIs) = c("1 vs 2", "1 vs 3", "2 vs 3", "2 vs 4", "3 vs 4")
+  list(diffs, vardiff, CIs)
+  
+}
+
+
+```
+
+Verifying the simulated datasets:
+
+```{r}
+findMeans = function(x){
+  sim_grouped = (exp.generalize.test %>% filter(!is.na(Alternation2)) %>% mutate(Alternation2 = sim_datasets[,x]) %>% group_by(userCode, Place, Exp, Alternation2) %>% summarise(no = n()))
+  rarefreq = sim_grouped %>% dcast(userCode + Place + Exp ~ Alternation2, sum, value.var = "no", margins = c("userCode", "Alternation2"))
+  colnames(rarefreq) = c("userCode","Place", "Exp", "rareFeat","freqFeat","all")
+  rarefreq = rarefreq %>% mutate(perc = freqFeat / (freqFeat + rareFeat))
+  meanPerc = numeric(4)
+  meanPerc[1] = mean(as.matrix(rarefreq %>% filter(Place == "Coronal", Exp == "Exp1") %>% select(perc)))
+  meanPerc[2] = mean(as.matrix(rarefreq %>% filter(Place == "Labial", Exp == "Exp1") %>% select(perc)))
+  meanPerc[3] = mean(as.matrix(rarefreq %>% filter(Place == "Coronal", Exp == "Exp2") %>% select(perc)))
+  meanPerc[4] = mean(as.matrix(rarefreq %>% filter(Place == "Labial", Exp == "Exp2") %>% select(perc)))
+  meanPerc
+}
+sim_perc_means = sapply(1:1000, findMeans)
+
+```
+
+Simulation reuslts:
+
+```{r}
+library(parallel)
+
+sim_results = lapply(1:ncol(sim_datasets), function(x) getCIsFromDataset(sim_datasets[,x]))
+
+sim_diffs = sapply(sim_results, function(x) x[[1]])
+mean_sim_diffs = rowMeans(sim_diffs)
+printVector(mean_sim_diffs)
+sim_vardiffs = var(t(sim_diffs))
+printLatexTable(sim_vardiffs)
+
+sim_cis_high = sapply(sim_results, function(x) x[[3]][2,])
+sim_cis_low = sapply(sim_results, function(x) x[[3]][1,])
+coverages = sapply(1:ncol(sim_cis_high), function(x) (sim_cis_low[,x] < diffs & diffs < sim_cis_high[,x]))
+coverages_percs = rowMeans(coverages)
+coverages_percs
+```
+
+
+```{r}
+shapiro.test(sim_diffs[,1])
+shapiro.test(sim_diffs[,2])
+shapiro.test(sim_diffs[,3])
+shapiro.test(sim_diffs[,4])
+shapiro.test(sim_diffs[,5])
+shapiro.test(sim_diffs[,6])
+
+```
+
+Carrying out the bootstrap:
+
+```{r}
+median_sim_diffs = apply(sim_diffs, 1, median)
+est_bias = median_sim_diffs - diffs
+low_quantiles = apply(sim_diffs, 1, function(x) quantile(x,.05/10)) - median_sim_diffs
+up_quantiles = apply(sim_diffs, 1, function(x) quantile(x,1-.95/10)) - median_sim_diffs
+CIs_boot = t(cbind(diffs - est_bias + low_quantiles, diffs - est_bias + up_quantiles))
+CIs_boot
+printCIs(CIs_boot[1,],CIs_boot[2,])
+```
+
+Simulating the bootstrap:
+
+```{r}
+getDiffsFromDataset = function(dataset){
+  exp.generalize.test_new = exp.generalize.test_new %>% filter(!is.na(Alternation2)) %>% mutate(Alternation2 = dataset)
+  generalize.exp.lmer2_new = glmer(Alternation2 ~ Place + Exp + (1 + Place|userCode) + (1|item), data=exp.generalize.test_new,
+      family=binomial(link="logit"), control = glmerControl(optimizer="bobyqa"))
+  beta = generalize.exp.lmer2_new@beta
+  
+  p_lr_lang1_cor = 1 / (exp(-beta[1] - beta[2] + beta[3]) + 1)
+  p_lr_lang1_lab = 1 / (exp(-beta[1] + beta[2] + beta[3]) + 1)
+  p_lr_lang2_cor = 1 / (exp(-beta[1] - beta[2] - beta[3]) + 1)
+  p_lr_lang2_lab = 1 / (exp(-beta[1] + beta[2] - beta[3]) + 1)
+  p_lr = c(p_lr_lang1_cor, p_lr_lang1_lab, p_lr_lang2_cor, p_lr_lang2_lab)
+    
+  kld_model1_lang1_cor = computeKLD(p_model1[1], p_lr[1])
+  kld_model1_lang1_lab = computeKLD(p_model1[2], p_lr[2])
+  kld_model1_lang2_cor = computeKLD(p_model1[3], p_lr[3])
+  kld_model1_lang2_lab = computeKLD(p_model1[4], p_lr[4])
+  kld_model1 = c(kld_model1_lang1_cor, kld_model1_lang1_lab, kld_model1_lang2_cor, kld_model1_lang2_lab)
+  kld_model1_mean = mean(kld_model1)
+  
+  kld_model2_lang1_cor = computeKLD(p_model2[1], p_lr[1])
+  kld_model2_lang1_lab = computeKLD(p_model2[2], p_lr[2])
+  kld_model2_lang2_cor = computeKLD(p_model2[3], p_lr[3])
+  kld_model2_lang2_lab = computeKLD(p_model2[4], p_lr[4])
+  kld_model2 = c(kld_model2_lang1_cor, kld_model2_lang1_lab, kld_model2_lang2_cor, kld_model2_lang2_lab)
+  kld_model2_mean = mean(kld_model2)
+  
+  kld_model3_lang1_cor = computeKLD(p_model3[1], p_lr[1])
+  kld_model3_lang1_lab = computeKLD(p_model3[2], p_lr[2])
+  kld_model3_lang2_cor = computeKLD(p_model3[3], p_lr[3])
+  kld_model3_lang2_lab = computeKLD(p_model3[4], p_lr[4])
+  kld_model3 = c(kld_model3_lang1_cor, kld_model3_lang1_lab, kld_model3_lang2_cor, kld_model3_lang2_lab)
+  kld_model3_mean = mean(kld_model3)
+  
+  kld_model4_lang1_cor = computeKLD(p_model4[1], p_lr[1])
+  kld_model4_lang1_lab = computeKLD(p_model4[2], p_lr[2])
+  kld_model4_lang2_cor = computeKLD(p_model4[3], p_lr[3])
+  kld_model4_lang2_lab = computeKLD(p_model4[4], p_lr[4])
+  kld_model4 = c(kld_model4_lang1_cor, kld_model4_lang1_lab, kld_model4_lang2_cor, kld_model4_lang2_lab)
+  kld_model4_mean = mean(kld_model4)
+  
+  klds = c(kld_model1, kld_model2, kld_model3, kld_model4)
+  C = matrix(c(rep(-1/4, 4), rep(1/4, 4),    rep(0, 4),      rep(0, 4),
+               rep(-1/4, 4), rep(0, 4),      rep(1/4, 4),    rep(0, 4),
+               rep(0, 4),    rep(-1/4, 4),   rep(1/4, 4),    rep(0, 4),
+               rep(0, 4),    rep(-1/4, 4),   rep(0, 4),      rep(1/4, 4),
+               rep(0, 4),    rep(0, 4),      rep(-1/4, 4),   rep(1/4, 4)
+        ), nrow = 5, byrow = T)
+  diffs = C %*% klds
+  diffs
+  
+}
+
+
+getBootCIsFromDataset = function(dataset){
+  dataset = exp.generalize.test_new %>% filter(!is.na(Alternation2)) %>% mutate(Alternation2 = dataset)
+  origModel = glmer(Alternation2 ~ Place + Exp + (1 + Place|userCode) + (1|item), data = dataset,
+      family = binomial(link="logit"), control = glmerControl(optimizer="bobyqa"))
+  
+  beta = origModel@beta
+  p_lr_lang1_cor = 1 / (exp(-beta[1] - beta[2] + beta[3]) + 1)
+  p_lr_lang1_lab = 1 / (exp(-beta[1] + beta[2] + beta[3]) + 1)
+  p_lr_lang2_cor = 1 / (exp(-beta[1] - beta[2] - beta[3]) + 1)
+  p_lr_lang2_lab = 1 / (exp(-beta[1] + beta[2] - beta[3]) + 1)
+  p_lr = c(p_lr_lang1_cor, p_lr_lang1_lab, p_lr_lang2_cor, p_lr_lang2_lab)
+
+    kld_model1_lang1_cor = computeKLD(p_model1[1], p_lr[1])
+  kld_model1_lang1_lab = computeKLD(p_model1[2], p_lr[2])
+  kld_model1_lang2_cor = computeKLD(p_model1[3], p_lr[3])
+  kld_model1_lang2_lab = computeKLD(p_model1[4], p_lr[4])
+  kld_model1 = c(kld_model1_lang1_cor, kld_model1_lang1_lab, kld_model1_lang2_cor, kld_model1_lang2_lab)
+  kld_model1_mean = mean(kld_model1)
+  
+  kld_model2_lang1_cor = computeKLD(p_model2[1], p_lr[1])
+  kld_model2_lang1_lab = computeKLD(p_model2[2], p_lr[2])
+  kld_model2_lang2_cor = computeKLD(p_model2[3], p_lr[3])
+  kld_model2_lang2_lab = computeKLD(p_model2[4], p_lr[4])
+  kld_model2 = c(kld_model2_lang1_cor, kld_model2_lang1_lab, kld_model2_lang2_cor, kld_model2_lang2_lab)
+  kld_model2_mean = mean(kld_model2)
+  
+  kld_model3_lang1_cor = computeKLD(p_model3[1], p_lr[1])
+  kld_model3_lang1_lab = computeKLD(p_model3[2], p_lr[2])
+  kld_model3_lang2_cor = computeKLD(p_model3[3], p_lr[3])
+  kld_model3_lang2_lab = computeKLD(p_model3[4], p_lr[4])
+  kld_model3 = c(kld_model3_lang1_cor, kld_model3_lang1_lab, kld_model3_lang2_cor, kld_model3_lang2_lab)
+  kld_model3_mean = mean(kld_model3)
+  
+  kld_model4_lang1_cor = computeKLD(p_model4[1], p_lr[1])
+  kld_model4_lang1_lab = computeKLD(p_model4[2], p_lr[2])
+  kld_model4_lang2_cor = computeKLD(p_model4[3], p_lr[3])
+  kld_model4_lang2_lab = computeKLD(p_model4[4], p_lr[4])
+  kld_model4 = c(kld_model4_lang1_cor, kld_model4_lang1_lab, kld_model4_lang2_cor, kld_model4_lang2_lab)
+  kld_model4_mean = mean(kld_model4)
+  
+  klds = c(kld_model1, kld_model2, kld_model3, kld_model4)
+  C = matrix(c(rep(-1/4, 4), rep(1/4, 4),    rep(0, 4),      rep(0, 4),
+               rep(-1/4, 4), rep(0, 4),      rep(1/4, 4),    rep(0, 4),
+               rep(0, 4),    rep(-1/4, 4),   rep(1/4, 4),    rep(0, 4),
+               rep(0, 4),    rep(-1/4, 4),   rep(0, 4),      rep(1/4, 4),
+               rep(0, 4),    rep(0, 4),      rep(-1/4, 4),   rep(1/4, 4)
+        ), nrow = 5, byrow = T)
+  diffs = C %*% klds
+
+  
+  sim_datasets = simulate(origModel, nsim = 1000)
+
+  sim_diffs = sapply(1:ncol(sim_datasets), function(x) getDiffsFromDataset(sim_datasets[,x]))
+
+  median_sim_diffs = apply(sim_diffs, 1, median)
+  est_bias = median_sim_diffs - diffs
+  low_quantiles = apply(sim_diffs, 1, function(x) quantile(x,.05/10)) - median_sim_diffs
+  up_quantiles = apply(sim_diffs, 1, function(x) quantile(x,1-.95/10)) - median_sim_diffs
+  CIs_boot = t(cbind(diffs - est_bias + low_quantiles, diffs - est_bias + up_quantiles))
+  CIs_boot
+}
+
+library(parallel)
+cl = makeCluster(getOption("cl.cores", detectCores()), outfile="log.txt")
+clusterExport(cl, c("getBootCIsFromDataset", "exp.generalize.test_new", "getDiffsFromDataset", "sim_datasets", "computeKLD", "p_model1", "p_model2", "p_model3", "p_model4", "computeKLDDer", "computePDer"))
+clusterEvalQ(cl, {library(dplyr)
+  library(lme4)})
+sim_bootCIs = parLapply(cl, 1:100, function(x) getBootCIsFromDataset(sim_datasets[,x]))
+sim_bootCIs_high = sapply(sim_bootCIs, function(x) x[2,])
+sim_bootCIs_low = sapply(sim_bootCIs, function(x) x[1,])
+coverages_bootCIs = sapply(1:ncol(sim_bootCIs_high), function(x) (sim_bootCIs_low[,x] < diffs & diffs < sim_bootCIs_high[,x]))
+coverages_percs_bootCIs = rowMeans(coverages_bootCIs)
+coverage_overall_bootCIs = mean(apply(coverages_bootCIs, 2, all))
 ```

@@ -30,10 +30,6 @@ aps_counts = cbind.data.frame(id = 1:nrow(aps_counts),aps_counts)
 Importing the corpus:
   
 ```{r}
-aps = read_csv("all_parsed_syls_wt.csv")
-aps = aps %>% mutate(syl = paste0(o,n,c,t)) %>% mutate(syl = as.factor(syl))
-aps
-
 aps_aug = aps %>% group_by(o,n,c,t) %>% summarise(count = n()) #One syllable per row with counts
 aps_aug = cbind.data.frame(syl = paste(aps_aug$o, aps_aug$n, aps_aug$c, aps_aug$t, sep=""), aps_aug) #Add syl
 aps_aug
@@ -209,7 +205,7 @@ cmatrix = t(matrix(c(1,-1,0,0,
 var_diffs = cmatrix %*% var %*% t(cmatrix)
 
 estimates_diffs = cmatrix %*% fl
-cv = qnorm(1-.05/6)
+cv = qnorm(1 - .05/12)
 estimates_diffs - cv * sqrt(diag(var_diffs))
 estimates_diffs + cv * sqrt(diag(var_diffs))
 ```
@@ -340,8 +336,8 @@ getCIsFromFakeCorpus = function(aps_aug_fake, estimates_diffs, cmatrix, n){
   var_diffs = cmatrix %*% var %*% t(cmatrix)
 
   #CIs
-  lower = estimates_diffs - qnorm(0.9916667) * sqrt(diag(var_diffs))
-  upper = estimates_diffs + qnorm(0.9916667) * sqrt(diag(var_diffs))
+  lower = estimates_diffs - qnorm(1 - .05/12) * sqrt(diag(var_diffs))
+  upper = estimates_diffs + qnorm(1 - .05/12) * sqrt(diag(var_diffs))
   print("Done one cycle")
   c(lower, upper)
 }
@@ -355,22 +351,22 @@ coveragesSep = apply(coverages, 1, function(row) mean(row))
 
 ```
 
+```{r}
+apply(shapiro.test)
+```
 
 ## Simulation with file REs
 Importing the corpus with filenames:
 
 ```{r}
 aps.wf = read.csv("all_syls_withfile.csv") %>% mutate(syl = paste0(o,n,c,t)) %>% mutate(syl = as.factor(syl))
-aps.wf_counts = aps %>% group_by(o,n,c,t,file) %>% summarise(count = n())
+aps.wf_counts = aps.wf %>% group_by(o,n,c,t,file) %>% summarise(count = n())
 ```
 
 ```{r}
 library(brms)
 softmax_re_stanmodel = mblogit(syl ~ 1, aps.wf, random = ~ 1 | file)
 ```
-
-
-##Simulation with words
 
 
 ##Simulation with words
@@ -439,23 +435,30 @@ fakeCorpora_w = parLapply(cl, fakeCorporaWordFmt, getAPSAugfromAPWAug, aps_aug)
 
 Repeat what we've done above:
 ```{r}
-simFLDiffEstimates_w = parLapply(cl, fakeCorpora_w, getFLDiffsFromFakeCorpus, cmatrix)
+getFLDiffsFromFakeCorpus(fakeCorpora_w[[1]] , cmatrix)
+clusterExport(cl, c("aug_to_data", "getEntropy", "cmatrix", "getFLDiffsFromFakeCorpus"))
+simFLDiffEstimates_w = parLapply(cl, fakeCorpora_w, function(corp) getFLDiffsFromFakeCorpus(corp %>% ungroup(), cmatrix))
 simFLDiffMatrix_w = t(Reduce(cbind, simFLDiffEstimates_w))
 empFLDiffMeanVec_w = colMeans(simFLDiffMatrix_w)
 empFLDiffVarMatrix_w = var(simFLDiffMatrix_w)
 
-getCIsFromFakeCorpus(fakeCorpora[[1]],simFLDiffEstimates[[1]], cmatrix, 155672)
-clusterExport(cl, c("getCIsFromFakeCorpus", "fakeCorpora", "simFLDiffEstimates","findFisher","n","cmatrix","findModifiedEntropyAndDerivative","findModifiedEntropy"))
-simEntropyCIs = parSapply(cl, 1:length(fakeCorpora), function(x) getCIsFromFakeCorpus(fakeCorpora[[x]], simFLDiffEstimates[[x]], cmatrix, n))
-trueEntropies = estimates_diffs
-coverages = apply(simEntropyCIs, 2, function(col) (col[1:6] <= trueEntropies) & (col[7:12] >= trueEntropies))
-coverageOverall = apply(coverages, 2, function(col) all(col))
-coveragesSep = apply(coverages, 1, function(row) mean(row))
-
-
-getCIsFromFakeCorpus(fakeCorpora_w[[1]],simEntropyEstimates_w[[1]], cmatrix, 155672)
-clusterExport(cl, c("getCIsFromFakeCorpus", "fakeCorpora", "simEntropyEstimates","findFisher","n","cmatrix"))
-simEntropyCIs_w = sapply(1:length(fakeCorpora_w), function(x) getCIsFromFakeCorpus(fakeCorpora_w[[x]], simEntropyEstimates_w[[x]], cmatrix, n))
+getCIsFromFakeCorpus(fakeCorpora_w[[1]],simFLDiffEstimates_w[[1]], cmatrix, 155672)
+clusterExport(cl, c("getCIsFromFakeCorpus", "fakeCorpora_w", "simFLDiffEstimates_w","findFisher","n","cmatrix","findModifiedEntropyAndDerivative","findModifiedEntropy"))
+simEntropyCIs_w = parSapply(cl, 1:length(fakeCorpora_w), function(x) getCIsFromFakeCorpus(fakeCorpora_w[[x]] %>% ungroup(), simFLDiffEstimates_w[[x]], cmatrix, n))
 coverages_w = apply(simEntropyCIs_w, 2, function(col) (col[1:6] <= trueEntropies) & (col[7:12] >= trueEntropies))
+coverageOverall_w = apply(coverages_w, 2, function(col) all(col))
+coveragesSep_w = apply(coverages_w, 1, function(row) mean(row))
 
+shapiro.test(simFLDiffMatrix_w[,1])
+shapiro.test(simFLDiffMatrix_w[,2])
+shapiro.test(simFLDiffMatrix_w[,3])
+shapiro.test(simFLDiffMatrix_w[,4])
+shapiro.test(simFLDiffMatrix_w[,5])
+shapiro.test(simFLDiffMatrix_w[,6])
+
+```
+
+```{r}
+nsyls = sapply(fakeCorpora_w, function(aps_aug) sum(aps_aug$count))
+summary(nsyls)
 ```
