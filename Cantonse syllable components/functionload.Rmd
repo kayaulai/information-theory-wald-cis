@@ -13,6 +13,17 @@ set.seed(2018)
 ```
 
 ```{r}
+printCIs = function(low, up){
+  cis = paste0("(", signif(low, 4), ", ", signif(up, 4), ")")
+  paste(cis, collapse = ", ")
+}
+printLatexTable = function(matrix){
+  print(xtable(matrix,align=rep("",ncol(matrix)+1), digits = 4, display = rep("g", 1 + ncol(matrix))),include.rownames = FALSE, include.colnames = FALSE, floating=FALSE, tabular.environment="bmatrix", hline.after=NULL)
+}
+printVector = function(vec) paste(signif(vec, 4), collapse=",")
+```
+
+```{r}
 syls_wt = read.csv("all_syls_withfile.csv") %>% mutate(syl = paste0(o,n,c,t)) %>% mutate(syl = as.factor(syl))
 aps = syls_wt %>% select(-c("file"))
 
@@ -293,12 +304,7 @@ simFLDiffEstimates = parLapply(cl, fakeCorpora, getFLDiffsFromFakeCorpus, cmatri
 simFLDiffMatrix = t(Reduce(cbind, simFLDiffEstimates))
 empFLDiffMeanVec = colMeans(simFLDiffMatrix)
 empFLDiffVarMatrix = var(simFLDiffMatrix)
-shapiro.test(simFLDiffMatrix[,1])
-shapiro.test(simFLDiffMatrix[,2])
-shapiro.test(simFLDiffMatrix[,3])
-shapiro.test(simFLDiffMatrix[,4])
-shapiro.test(simFLDiffMatrix[,5])
-shapiro.test(simFLDiffMatrix[,6])
+st.pvals = apply(simFLDiffMatrix, 2, function(x) shapiro.test(x)$p.value)
 
 getProbsFromFakeCorpus = function(aps_aug_fake){
   probs = aps_aug_fake$count / sum(aps_aug_fake$count) #MLEs of probs
@@ -349,23 +355,6 @@ coverages = apply(simEntropyCIs, 2, function(col) (col[1:6] <= trueEntropies) & 
 coverageOverall = apply(coverages, 2, function(col) all(col))
 coveragesSep = apply(coverages, 1, function(row) mean(row))
 
-```
-
-```{r}
-apply(shapiro.test)
-```
-
-## Simulation with file REs
-Importing the corpus with filenames:
-
-```{r}
-aps.wf = read.csv("all_syls_withfile.csv") %>% mutate(syl = paste0(o,n,c,t)) %>% mutate(syl = as.factor(syl))
-aps.wf_counts = aps.wf %>% group_by(o,n,c,t,file) %>% summarise(count = n())
-```
-
-```{r}
-library(brms)
-softmax_re_stanmodel = mblogit(syl ~ 1, aps.wf, random = ~ 1 | file)
 ```
 
 
@@ -435,7 +424,6 @@ fakeCorpora_w = parLapply(cl, fakeCorporaWordFmt, getAPSAugfromAPWAug, aps_aug)
 
 Repeat what we've done above:
 ```{r}
-getFLDiffsFromFakeCorpus(fakeCorpora_w[[1]] , cmatrix)
 clusterExport(cl, c("aug_to_data", "getEntropy", "cmatrix", "getFLDiffsFromFakeCorpus"))
 simFLDiffEstimates_w = parLapply(cl, fakeCorpora_w, function(corp) getFLDiffsFromFakeCorpus(corp %>% ungroup(), cmatrix))
 simFLDiffMatrix_w = t(Reduce(cbind, simFLDiffEstimates_w))
@@ -448,14 +436,7 @@ simEntropyCIs_w = parSapply(cl, 1:length(fakeCorpora_w), function(x) getCIsFromF
 coverages_w = apply(simEntropyCIs_w, 2, function(col) (col[1:6] <= trueEntropies) & (col[7:12] >= trueEntropies))
 coverageOverall_w = apply(coverages_w, 2, function(col) all(col))
 coveragesSep_w = apply(coverages_w, 1, function(row) mean(row))
-
-shapiro.test(simFLDiffMatrix_w[,1])
-shapiro.test(simFLDiffMatrix_w[,2])
-shapiro.test(simFLDiffMatrix_w[,3])
-shapiro.test(simFLDiffMatrix_w[,4])
-shapiro.test(simFLDiffMatrix_w[,5])
-shapiro.test(simFLDiffMatrix_w[,6])
-
+st.pvals_w = apply(simFLDiffMatrix_w, 2, function(x) shapiro.test(x)$p.value)
 ```
 
 ```{r}

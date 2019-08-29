@@ -126,7 +126,7 @@ upper = estimates_diffs + qnorm(1-.05/12) * sqrt(diag(var_diffs_monosyl))
 
 printCIs = function(low, up){
   cis = paste0("(", signif(low, 4), ", ", signif(up, 4), ")")
-  print(cis, collapse = ", ")
+  paste(cis, collapse = ", ")
 }
 printCIs(lower, upper)
 ```
@@ -196,6 +196,8 @@ simEntropyEstimates = parLapply(cl, fakeCorpora, getEntropiesFromFakeCorpus, cma
 simEntropiesMatrix = t(Reduce(cbind, simEntropyEstimates))
 empVarMatrix = var(simEntropiesMatrix)
 empMeanVec = colMeans(simEntropiesMatrix)
+st.pvals = apply(simEntropiesMatrix, 2, function(x) shapiro.test(x)$p.value)
+
 
 getProbsFromFakeCorpus = function(aps_aug_fake){
   probs = aps_aug_fake$count / sum(aps_aug_fake$count) #MLEs of probs
@@ -347,6 +349,7 @@ fakeCorpora_w = parLapply(cl, fakeCorporaWordFmt, getAPSAugfromAPWAug, aps_aug)
 Repeat what we've done above:
 
 ```{r}
+printVector = function(vec) paste(signif(vec, 4), collapse=",")
 
 simEntropyEstimates_w = parLapply(cl, fakeCorpora_w, getEntropiesFromFakeCorpus, cmatrix)
 simEntropiesMatrix_w = t(Reduce(cbind, simEntropyEstimates_w))
@@ -354,11 +357,12 @@ empVarMatrix_w = var(simEntropiesMatrix_w)
 empMeanVec_w = colMeans(simEntropiesMatrix_w)
 
 getCIsFromFakeCorpus(fakeCorpora_w[[1]],simEntropyEstimates_w[[1]], cmatrix, 155672)
-clusterExport(cl, c("getCIsFromFakeCorpus", "fakeCorpora", "simEntropyEstimates","findFisher","n","cmatrix"))
-simEntropyCIs_w = sapply(1:length(fakeCorpora_w), function(x) getCIsFromFakeCorpus(fakeCorpora_w[[x]], simEntropyEstimates_w[[x]], cmatrix, n))
+clusterExport(cl, c("getCIsFromFakeCorpus", "fakeCorpora_w", "simEntropyEstimates_w","findFisher","n","cmatrix"))
+simEntropyCIs_w = parSapply(cl, 1:length(fakeCorpora_w), function(x) getCIsFromFakeCorpus(fakeCorpora_w[[x]], simEntropyEstimates_w[[x]], cmatrix, n))
 coverages_w = apply(simEntropyCIs_w, 2, function(col) (col[1:6] <= trueEntropies) & (col[7:12] >= trueEntropies))
 coverageOverall_w = apply(coverages_w, 2, function(col) all(col))
 coveragesSep_w = apply(coverages_w, 1, function(row) mean(row))
+st.pvals_w = apply(simEntropiesMatrix_w, 2, function(x) shapiro.test(x)$p.value)
 
 shapiro.test(simEntropiesMatrix_w[,1])
 shapiro.test(simEntropiesMatrix_w[,2])
